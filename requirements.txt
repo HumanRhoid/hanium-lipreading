@@ -1,0 +1,14 @@
+# 한이음 립리딩 — 의존성 스타터
+# ※ PyTorch는 여기 두지 말고 ROCm(7900 XTX)/CUDA 빌드로 "별도" 설치할 것
+#   - ROCm(Windows): https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/install/installrad/windows/install-pytorch.html
+#   - CUDA: https://pytorch.org/get-started/locally/
+#   설치 후 확인: python -c "import torch; print(torch.cuda.is_available())"
+
+numpy
+pandas
+opencv-python
+mediapipe
+tqdm
+scikit-learn
+tensorboard
+ffmpeg-python   # 시스템에 ffmpeg 설치 필요
