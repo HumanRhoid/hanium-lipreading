@@ -35,10 +35,10 @@ pip install -r requirements.txt
 ## ⚠️ 데이터 정책 (중요)
 - **AI Hub 데이터·영상·가중치는 절대 커밋 금지** (라이선스 + 얼굴/개인정보). `.gitignore`로 제외됨.
 - 데이터는 팀 공유 드라이브/클라우드로 관리. `data/README.md` 참고.
-- 자체 녹화 영상은 **촬영·활용 동의** 후 사용.
+
 
 ## 커밋 컨벤션
-`Feat / Fix / Design / Refactor / Chore / Docs` + 이모지 (팀 합의 형식)
+`Feat / Fix / Design / Refactor / Chore / Docs`
 
 ## 팀
 노현수 · 박제형 · 서지민 · 이예빈
