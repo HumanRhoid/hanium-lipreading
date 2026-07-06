@@ -104,14 +104,29 @@ hanium-lipreading
 
 ## 5. 개발 환경 세팅
 
-```bash
-python -m venv .venv
-# Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+이 프로젝트의 기본 Python 개발 환경 도구는 **uv**입니다.
+`pyproject.toml`과 `uv.lock`을 기준으로 팀원이 같은 의존성 해석 결과를 재현합니다.
 
-# PyTorch는 별도 설치 (ROCm / CUDA 빌드) — requirements.txt 주석 참고
-python -c "import torch; print(torch.cuda.is_available())"   # True 확인
+```bash
+# 1) uv 설치 확인
+uv --version
+
+# 2) Python 3.11 가상환경 생성 + 기본 의존성 설치
+uv sync
+
+# 3) 가상환경에서 명령 실행
+uv run python --version
+uv run python -c "import cv2, mediapipe, numpy; print('deps ok')"
+
+# 4) PyTorch는 GPU 환경별 ROCm/CUDA 빌드를 별도 설치
+# ROCm(Windows): https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/install/installrad/windows/install-pytorch.html
+# CUDA: https://pytorch.org/get-started/locally/
+uv run python -c "import torch; print(torch.cuda.is_available())"   # GPU 사용 가능 여부 확인
 ```
+
+> 의존성의 단일 기준은 `pyproject.toml` / `uv.lock`입니다.
+> Colab처럼 현재 Python 환경에 직접 설치해야 하는 경우에도 `requirements.txt`를 커밋하지 않고,
+> 필요한 패키지는 `pyproject.toml`을 기준으로 설치하거나 임시 export해서 사용합니다.
 
 ---
 
