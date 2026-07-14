@@ -1,0 +1,86 @@
+name: 백엔드 CI
+
+on:
+  pull_request:
+    branches:
+      - develop
+      - main
+  push:
+    branches:
+      - develop
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: 코드 품질
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: uv 설치
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.28"
+          enable-cache: true
+
+      - name: Python 설치
+        run: uv python install
+
+      - name: 의존성 잠금 검사
+        run: uv lock --check
+
+      - name: 품질 검사 의존성 설치
+        run: uv sync --locked --only-group dev
+
+      - name: Ruff 린트 실행
+        run: uv run --no-sync ruff check --output-format=github .
+
+      - name: Ruff 포맷 검사
+        run: uv run --no-sync ruff format --check .
+
+  unit-tests:
+    name: 단위 테스트
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: uv 설치
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.28"
+          enable-cache: true
+
+      - name: Python 설치
+        run: uv python install
+
+      - name: 프로젝트 의존성 설치
+        run: uv sync --locked --dev
+
+      - name: 단위 테스트 실행
+        run: >-
+          uv run --no-sync pytest
+          --cov=src/preprocess
+          --cov-report=term-missing
+
+  repository-policy:
+    name: 저장소 정책
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: 금지되거나 지나치게 큰 파일 검사
+        run: python3 scripts/check_repository_policy.py
