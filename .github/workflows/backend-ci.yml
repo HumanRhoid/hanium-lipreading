@@ -1,4 +1,4 @@
-name: Backend CI
+name: 백엔드 CI
 
 on:
   pull_request:
@@ -20,67 +20,67 @@ concurrency:
 
 jobs:
   quality:
-    name: Quality
+    name: 코드 품질
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Check out repository
+      - name: 저장소 체크아웃
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
-      - name: Install uv
+      - name: uv 설치
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           version: "0.11.28"
           enable-cache: true
 
-      - name: Install Python
+      - name: Python 설치
         run: uv python install
 
-      - name: Check dependency lock
+      - name: 의존성 잠금 검사
         run: uv lock --check
 
-      - name: Install quality dependencies
+      - name: 품질 검사 의존성 설치
         run: uv sync --locked --only-group dev
 
-      - name: Run Ruff lint
+      - name: Ruff 린트 실행
         run: uv run --no-sync ruff check --output-format=github .
 
-      - name: Check Ruff formatting
+      - name: Ruff 포맷 검사
         run: uv run --no-sync ruff format --check .
 
   unit-tests:
-    name: Unit tests
+    name: 단위 테스트
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Check out repository
+      - name: 저장소 체크아웃
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
-      - name: Install uv
+      - name: uv 설치
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           version: "0.11.28"
           enable-cache: true
 
-      - name: Install Python
+      - name: Python 설치
         run: uv python install
 
-      - name: Install project dependencies
+      - name: 프로젝트 의존성 설치
         run: uv sync --locked --dev
 
-      - name: Run unit tests
+      - name: 단위 테스트 실행
         run: >-
           uv run --no-sync pytest
           --cov=src/preprocess
           --cov-report=term-missing
 
   repository-policy:
-    name: Repository policy
+    name: 저장소 정책
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Check out repository
+      - name: 저장소 체크아웃
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
-      - name: Reject prohibited or oversized files
+      - name: 금지되거나 지나치게 큰 파일 검사
         run: python3 scripts/check_repository_policy.py
