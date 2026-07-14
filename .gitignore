@@ -27,6 +27,10 @@ venv/
 env/
 *.egg-info/
 .ipynb_checkpoints/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
 # ── OS / IDE ──
 .DS_Store
