@@ -28,6 +28,9 @@ addopts = [
     "--strict-config",
     "--strict-markers",
 ]
+markers = [
+    "gpu: 실제 CUDA 또는 ROCm GPU가 필요한 테스트",
+]
 pythonpath = ["."]
 testpaths = ["tests"]
 
