@@ -52,6 +52,9 @@ def find_violations(paths: list[Path]) -> list[str]:
     violations: list[str] = []
 
     for path in paths:
+        if not path.exists():
+            continue
+
         relative_path = path.as_posix()
         lower_path = relative_path.lower()
 
