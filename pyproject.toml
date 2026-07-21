@@ -5,21 +5,29 @@ description = "Korean lipreading vision AI for closed-set phrase classification"
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
 dependencies = [
+    "alembic",
+    "asyncpg",
+    "fastapi",
     "numpy",
     "pandas",
     "opencv-python",
     "mediapipe",
+    "pydantic-settings",
+    "sqlalchemy[asyncio]",
     "tqdm",
     "scikit-learn",
     "tensorboard",
     "ffmpeg-python",
+    "uvicorn[standard]",
 ]
 
 [dependency-groups]
 dev = [
+    "httpx2",
     "ipykernel",
     "pytest",
     "pytest-cov",
+    "pytest-asyncio",
     "ruff",
 ]
 
@@ -27,6 +35,10 @@ dev = [
 addopts = [
     "--strict-config",
     "--strict-markers",
+]
+asyncio_mode = "auto"
+markers = [
+    "integration: 실제 PostgreSQL 등 외부 런타임이 필요한 통합 테스트",
 ]
 pythonpath = ["."]
 testpaths = ["tests"]
