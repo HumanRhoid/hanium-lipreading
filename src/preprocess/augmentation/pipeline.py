@@ -133,9 +133,7 @@ class AugmentationConfig:
 
         for kernel_size in self.gaussian_blur_kernel_sizes:
             if kernel_size <= 0 or kernel_size % 2 == 0:
-                raise ValueError(
-                    "Gaussian Blur 커널 크기는 양의 홀수여야 합니다."
-                )
+                raise ValueError("Gaussian Blur 커널 크기는 양의 홀수여야 합니다.")
 
         jpeg_min, jpeg_max = self.jpeg_quality_range
         if jpeg_min < 1 or jpeg_max > 100:
@@ -148,9 +146,7 @@ class AugmentationConfig:
     ) -> None:
         minimum, maximum = value_range
         if minimum > maximum:
-            raise ValueError(
-                f"{name}의 최솟값은 최댓값보다 클 수 없습니다."
-            )
+            raise ValueError(f"{name}의 최솟값은 최댓값보다 클 수 없습니다.")
 
 
 @dataclass
@@ -244,9 +240,7 @@ class VideoAugmentation:
         if not self._should_apply(self.config.brightness_probability):
             return clip
 
-        delta = self._sample_float(
-            self.config.brightness_delta_range
-        )
+        delta = self._sample_float(self.config.brightness_delta_range)
         applied["brightness"] = {"delta": delta}
 
         return adjust_brightness(
@@ -262,9 +256,7 @@ class VideoAugmentation:
         if not self._should_apply(self.config.contrast_probability):
             return clip
 
-        factor = self._sample_float(
-            self.config.contrast_factor_range
-        )
+        factor = self._sample_float(self.config.contrast_factor_range)
         applied["contrast"] = {"factor": factor}
 
         return adjust_contrast(
@@ -277,14 +269,10 @@ class VideoAugmentation:
         clip: np.ndarray,
         applied: dict[str, dict[str, Any]],
     ) -> np.ndarray:
-        if not self._should_apply(
-            self.config.gaussian_noise_probability
-        ):
+        if not self._should_apply(self.config.gaussian_noise_probability):
             return clip
 
-        std = self._sample_float(
-            self.config.gaussian_noise_std_range
-        )
+        std = self._sample_float(self.config.gaussian_noise_std_range)
         applied["gaussian_noise"] = {"std": std}
 
         return add_gaussian_noise(
@@ -298,19 +286,11 @@ class VideoAugmentation:
         clip: np.ndarray,
         applied: dict[str, dict[str, Any]],
     ) -> np.ndarray:
-        if not self._should_apply(
-            self.config.gaussian_blur_probability
-        ):
+        if not self._should_apply(self.config.gaussian_blur_probability):
             return clip
 
-        kernel_size = int(
-            self.rng.choice(
-                self.config.gaussian_blur_kernel_sizes
-            )
-        )
-        sigma = self._sample_float(
-            self.config.gaussian_blur_sigma_range
-        )
+        kernel_size = int(self.rng.choice(self.config.gaussian_blur_kernel_sizes))
+        sigma = self._sample_float(self.config.gaussian_blur_sigma_range)
 
         applied["gaussian_blur"] = {
             "kernel_size": kernel_size,
@@ -331,9 +311,7 @@ class VideoAugmentation:
         if not self._should_apply(self.config.rotation_probability):
             return clip
 
-        angle = self._sample_float(
-            self.config.rotation_degrees_range
-        )
+        angle = self._sample_float(self.config.rotation_degrees_range)
         applied["rotation"] = {
             "angle_degrees": angle,
         }
@@ -353,12 +331,8 @@ class VideoAugmentation:
 
         _, height, width, _ = clip.shape
 
-        shift_x_ratio = self._sample_float(
-            self.config.shift_x_ratio_range
-        )
-        shift_y_ratio = self._sample_float(
-            self.config.shift_y_ratio_range
-        )
+        shift_x_ratio = self._sample_float(self.config.shift_x_ratio_range)
+        shift_y_ratio = self._sample_float(self.config.shift_y_ratio_range)
 
         shift_x = shift_x_ratio * width
         shift_y = shift_y_ratio * height
@@ -384,9 +358,7 @@ class VideoAugmentation:
         if not self._should_apply(self.config.zoom_probability):
             return clip
 
-        scale = self._sample_float(
-            self.config.zoom_scale_range
-        )
+        scale = self._sample_float(self.config.zoom_scale_range)
         applied["zoom"] = {"scale": scale}
 
         return zoom_clip(
@@ -402,9 +374,7 @@ class VideoAugmentation:
         if not self._should_apply(self.config.jpeg_probability):
             return clip
 
-        quality = self._sample_int(
-            self.config.jpeg_quality_range
-        )
+        quality = self._sample_int(self.config.jpeg_quality_range)
         applied["jpeg_compression"] = {
             "quality": quality,
         }

@@ -31,8 +31,7 @@ def validate_clip(clip: np.ndarray) -> None:
 
     if clip.ndim != 4:
         raise ValueError(
-            "clip의 shape은 (T, H, W, C) 형태여야 합니다. "
-            f"현재 shape: {clip.shape}"
+            f"clip의 shape은 (T, H, W, C) 형태여야 합니다. 현재 shape: {clip.shape}"
         )
 
     if clip.shape[0] == 0:
@@ -40,15 +39,11 @@ def validate_clip(clip: np.ndarray) -> None:
 
     if clip.shape[-1] not in (1, 3):
         raise ValueError(
-            "clip의 채널 수는 1 또는 3이어야 합니다. "
-            f"현재 채널 수: {clip.shape[-1]}"
+            f"clip의 채널 수는 1 또는 3이어야 합니다. 현재 채널 수: {clip.shape[-1]}"
         )
 
     if clip.dtype != np.uint8:
-        raise TypeError(
-            "clip의 dtype은 uint8이어야 합니다. "
-            f"현재 dtype: {clip.dtype}"
-        )
+        raise TypeError(f"clip의 dtype은 uint8이어야 합니다. 현재 dtype: {clip.dtype}")
 
 
 def adjust_brightness(clip: np.ndarray, delta: float) -> np.ndarray:
@@ -337,11 +332,7 @@ def apply_jpeg_compression(
         if not encode_success:
             raise ValueError("JPEG 프레임 인코딩에 실패했습니다.")
 
-        decode_flag = (
-            cv2.IMREAD_GRAYSCALE
-            if frame.shape[-1] == 1
-            else cv2.IMREAD_COLOR
-        )
+        decode_flag = cv2.IMREAD_GRAYSCALE if frame.shape[-1] == 1 else cv2.IMREAD_COLOR
 
         decoded = cv2.imdecode(encoded, decode_flag)
 
