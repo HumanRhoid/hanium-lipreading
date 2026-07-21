@@ -188,9 +188,11 @@ class SQLAlchemyRecognitionRepository:
             )
             return result.rowcount or 0
 
-    async def seed_phrases(
+    async def sync_phrases(
         self, phrases: Iterable[tuple[str, str, PhraseCategory]]
     ) -> None:
+        """권위 있는 폐쇄형 문구 목록으로 phrase 테이블을 동기화한다."""
+
         values = [
             {
                 "phrase_code": code,
@@ -200,7 +202,12 @@ class SQLAlchemyRecognitionRepository:
             for code, text, category in phrases
         ]
         if not values:
-            return
+            raise ValueError("동기화할 폐쇄형 문구가 비어 있습니다")
+
+        phrase_codes = [value["phrase_code"] for value in values]
+        if len(phrase_codes) != len(set(phrase_codes)):
+            raise ValueError("phrase_code는 중복될 수 없습니다")
+
         statement = insert(Phrase).values(values)
         statement = statement.on_conflict_do_update(
             index_elements=[Phrase.phrase_code],
@@ -211,6 +218,9 @@ class SQLAlchemyRecognitionRepository:
         )
         async with self._session_factory.begin() as db_session:
             await db_session.execute(statement)
+            await db_session.execute(
+                delete(Phrase).where(Phrase.phrase_code.not_in(phrase_codes))
+            )
 
     async def purge(
         self,

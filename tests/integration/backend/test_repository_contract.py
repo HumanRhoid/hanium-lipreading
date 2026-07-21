@@ -17,13 +17,13 @@ from src.backend.recognition.domain import PhraseCategory, RecognitionMode
 pytestmark = pytest.mark.integration
 
 
-async def test_seed_phrases_is_idempotent_and_updates_mutable_fields(
+async def test_sync_phrases_is_idempotent_and_updates_mutable_fields(
     postgres_session_factory,
 ):
     """동일한 불변 코드는 중복하지 않고 표시 문구와 분류만 갱신한다."""
 
     repository = SQLAlchemyRecognitionRepository(postgres_session_factory)
-    await repository.seed_phrases(
+    await repository.sync_phrases(
         [("REQUEST_WATER", "물 주세요", PhraseCategory.REQUEST)]
     )
 
@@ -33,10 +33,10 @@ async def test_seed_phrases_is_idempotent_and_updates_mutable_fields(
         )
         original_id = original.phrase_id
 
-    await repository.seed_phrases(
+    await repository.sync_phrases(
         [("REQUEST_WATER", "물을 주세요", PhraseCategory.REPLY)]
     )
-    await repository.seed_phrases(
+    await repository.sync_phrases(
         [("REQUEST_WATER", "물을 주세요", PhraseCategory.REPLY)]
     )
 
@@ -47,6 +47,26 @@ async def test_seed_phrases_is_idempotent_and_updates_mutable_fields(
     assert phrases[0].phrase_id == original_id
     assert phrases[0].phrase_text == "물을 주세요"
     assert phrases[0].category == PhraseCategory.REPLY.value
+
+
+@pytest.mark.parametrize(
+    "phrases",
+    [
+        [],
+        [
+            ("REQUEST_WATER", "물 주세요", PhraseCategory.REQUEST),
+            ("REQUEST_WATER", "물을 주세요", PhraseCategory.REQUEST),
+        ],
+    ],
+)
+async def test_sync_phrases_rejects_empty_or_duplicate_catalog(
+    postgres_session_factory,
+    phrases,
+):
+    repository = SQLAlchemyRecognitionRepository(postgres_session_factory)
+
+    with pytest.raises(ValueError):
+        await repository.sync_phrases(phrases)
 
 
 async def test_purge_rejects_missing_or_ambiguous_target(postgres_session_factory):

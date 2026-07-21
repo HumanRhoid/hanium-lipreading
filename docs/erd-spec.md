@@ -96,20 +96,29 @@ PostgreSQL native enum 대신 `VARCHAR + CHECK`를 사용한다.
 - 오래된 열린 세션 reconciliation은 timezone이 포함된 명시적 기준 시각과 확인 옵션을 요구하며, 발화를 삭제하지 않고 `ended_at`만 기록한다.
 - 데모의 인식 데이터는 위 관리 명령으로 명시적으로 삭제한다. 실제 사용자 데이터를 저장하기 전에는 별도 보존기간과 정기 purge 운영 절차를 정해야 한다.
 
-## 6. 데모 seed
+## 6. 폐쇄형 문구 동기화
 
-schema migration과 데모 데이터 입력을 분리한다. idempotent seed 명령은 `phrase_code`를 기준으로 다음 문구를 upsert한다.
+schema migration과 폐쇄형 문구 데이터 입력을 분리한다. 동기화 명령은 `phrase_code`를 기준으로 다음 문구를 idempotent upsert하고, 이 목록에 없는 기존 문구는 같은 transaction에서 삭제한다. 빈 목록은 전체 삭제 사고를 막기 위해 거부한다. 삭제된 문구를 참조하던 과거 발화는 보존하고 `phrase_id`만 `NULL`로 둔다.
 
 | phrase_code | phrase_text | category |
 |---|---|---|
 | `PAIN_GENERAL` | 아파요 | `PAIN` |
 | `REQUEST_WATER` | 물 주세요 | `REQUEST` |
-| `REQUEST_TOILET` | 화장실 | `REQUEST` |
+| `REQUEST_PAINKILLER` | 진통제 주세요 | `REQUEST` |
+| `STATE_HUNGRY` | 배고파요 | `ETC` |
+| `REQUEST_TOILET` | 화장실 가고 싶어요 | `REQUEST` |
+| `REQUEST_NURSE` | 간호사 불러 주세요 | `REQUEST` |
+| `REQUEST_GUARDIAN` | 보호자 불러 주세요 | `REQUEST` |
+| `REQUEST_REPOSITION` | 자세 바꿔 주세요 | `REQUEST` |
+| `SYMPTOM_BREATHING_DIFFICULTY` | 숨 쉬기 힘들어요 | `ETC` |
+| `SYMPTOM_DIZZINESS` | 어지러워요 | `ETC` |
+| `SYMPTOM_NAUSEA` | 토할 것 같아요 | `ETC` |
 | `STATE_COLD` | 추워요 | `ETC` |
 | `STATE_HOT` | 더워요 | `ETC` |
-| `REQUEST_LIGHTS_OFF` | 불 꺼 주세요 | `REQUEST` |
+| `SYMPTOM_PHLEGM` | 가래가 있어요 | `ETC` |
+| `REQUEST_HELP` | 도와주세요 | `REQUEST` |
 
-문구셋이 확정되면 seed 데이터와 모델 bundle의 label map을 함께 갱신한다.
+숫자 class index와 문구의 대응은 모델 bundle의 라벨 맵이 소유한다. DB에는 숫자 라벨을 기록하지 않으며, 모델 어댑터가 반환한 `phrase_code`로 문구를 연결한다.
 
 ## 7. 의도적으로 저장하지 않는 데이터
 

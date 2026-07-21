@@ -31,7 +31,7 @@ async def test_create_and_complete_session_in_short_transactions(
     postgres_session_factory,
 ):
     repository = SQLAlchemyRecognitionRepository(postgres_session_factory)
-    await repository.seed_phrases(DEMO_PHRASES)
+    await repository.sync_phrases(DEMO_PHRASES)
     session_id = await repository.create_session(RecognitionMode.CLOSED)
 
     utterance_id = await repository.complete_session(
@@ -148,7 +148,7 @@ async def test_deleting_session_cascades_utterances(postgres_session_factory):
 
 async def test_deleting_phrase_keeps_utterance(postgres_session_factory):
     repository = SQLAlchemyRecognitionRepository(postgres_session_factory)
-    await repository.seed_phrases(DEMO_PHRASES)
+    await repository.sync_phrases(DEMO_PHRASES)
     session_id = await repository.create_session(RecognitionMode.CLOSED)
     utterance_id = await repository.complete_session(
         session_id,
@@ -168,6 +168,38 @@ async def test_deleting_phrase_keeps_utterance(postgres_session_factory):
         utterance = await db_session.get(Utterance, utterance_id)
 
     assert utterance is not None
+    assert utterance.phrase_id is None
+
+
+async def test_sync_phrases_removes_retired_phrase_and_keeps_utterance(
+    postgres_session_factory,
+):
+    repository = SQLAlchemyRecognitionRepository(postgres_session_factory)
+    await repository.sync_phrases(
+        [("REQUEST_LIGHTS_OFF", "불 꺼 주세요", PhraseCategory.REQUEST)]
+    )
+    session_id = await repository.create_session(RecognitionMode.CLOSED)
+    utterance_id = await repository.complete_session(
+        session_id,
+        RecognitionOutput(
+            raw_text="불 꺼 주세요",
+            confidence=0.8,
+            phrase_code="REQUEST_LIGHTS_OFF",
+        ),
+    )
+
+    await repository.sync_phrases(DEMO_PHRASES)
+
+    async with postgres_session_factory() as db_session:
+        retired_phrase = await db_session.scalar(
+            select(Phrase).where(Phrase.phrase_code == "REQUEST_LIGHTS_OFF")
+        )
+        remaining_codes = set(await db_session.scalars(select(Phrase.phrase_code)))
+        utterance = await db_session.get(Utterance, utterance_id)
+
+    assert retired_phrase is None
+    assert remaining_codes == {"REQUEST_WATER", "PAIN_GENERAL"}
+    assert utterance.raw_text == "불 꺼 주세요"
     assert utterance.phrase_id is None
 
 

@@ -99,6 +99,8 @@ v1 외부 입력 계약인 JPEG, 정확히 `640x360`, 목표 `25fps`, message당
 - 선택적인 `confidence`
 - 선택적인 폐쇄형 `phrase_code`
 
+숫자 class index는 모델 어댑터가 bundle의 라벨 맵으로 해석한다. 어댑터 밖의 서비스, 외부 API와 DB는 숫자 라벨을 저장하거나 노출하지 않고 `phrase_code`와 인식 문구만 사용한다.
+
 실제 모델 어댑터는 전처리, FPS, 입력 프레임 수, 입력 크기, 정규화, 체크포인트와 라벨 맵을 하나의 versioned bundle로 묶는다. `SyncPredictor`가 제공하고 `RecognitionGateway`가 노출하는 `ModelManifest`는 `bundle_version`, 선택적인 `label_map_version`, `supported_modes`, `input_codec`, frame 크기·FPS와 `input_frame_count=30`으로 bundle 능력을 서비스에 알리는 계약이다.
 
 - 서비스 조립 시 manifest의 codec, frame 크기와 FPS가 v1 고정 계약인 JPEG, `640x360`, `25fps`와 일치하는지 검사한다.

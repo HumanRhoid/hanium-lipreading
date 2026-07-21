@@ -158,9 +158,9 @@ cp .env.example .env
 docker compose up -d --wait postgres
 uv sync --locked --dev
 
-# 3) 스키마와 멱등적인 데모 문구 데이터를 반영합니다.
+# 3) 스키마와 확정된 폐쇄형 문구 데이터를 동기화합니다.
 uv run alembic upgrade head
-uv run python scripts/seed_demo_phrases.py
+uv run python scripts/sync_closed_phrases.py
 
 # 4) API를 실행합니다.
 uv run uvicorn src.backend.main:app --reload --no-access-log --ws-max-size 524288
@@ -200,10 +200,10 @@ uv run alembic upgrade head
 uv run alembic revision --autogenerate -m "describe schema change"
 ```
 
-자동 생성된 migration은 반드시 직접 검토하고, ERD 명세·제약조건 테스트와 같은 PR에서 갱신합니다. 데모 문구 seed는 migration에 포함하지 않고 다음 멱등 명령으로 따로 관리합니다.
+자동 생성된 migration은 반드시 직접 검토하고, ERD 명세·제약조건 테스트와 같은 PR에서 갱신합니다. 폐쇄형 문구 데이터는 migration에 포함하지 않고 다음 명령으로 따로 관리합니다. 이 명령은 확정 문구를 멱등적으로 upsert하고 목록에 없는 기존 문구를 삭제해 DB를 정확히 동기화합니다. 삭제된 문구와 연결된 과거 발화는 유지되며 `phrase_id`만 `NULL`이 됩니다.
 
 ```bash
-uv run python scripts/seed_demo_phrases.py
+uv run python scripts/sync_closed_phrases.py
 ```
 
 인식 세션과 연결된 발화를 삭제하는 명령은 정확히 하나의 조건과 `--confirm`을 모두 요구합니다. `--before`에는 timezone이 포함된 ISO 8601 시각을 사용합니다.

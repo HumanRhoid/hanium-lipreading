@@ -9,23 +9,42 @@ import pytest
 from scripts import (
     purge_recognition_data,
     reconcile_abandoned_sessions,
-    seed_demo_phrases,
+    sync_closed_phrases,
 )
 from src.backend.recognition.domain import PhraseCategory
 
 
-def test_demo_phrases_match_the_six_phrase_contract():
-    assert seed_demo_phrases.DEMO_PHRASES == (
+def test_closed_phrases_match_the_confirmed_backend_contract():
+    assert sync_closed_phrases.CLOSED_PHRASES == (
         ("PAIN_GENERAL", "아파요", PhraseCategory.PAIN),
         ("REQUEST_WATER", "물 주세요", PhraseCategory.REQUEST),
-        ("REQUEST_TOILET", "화장실", PhraseCategory.REQUEST),
+        ("REQUEST_PAINKILLER", "진통제 주세요", PhraseCategory.REQUEST),
+        ("STATE_HUNGRY", "배고파요", PhraseCategory.ETC),
+        ("REQUEST_TOILET", "화장실 가고 싶어요", PhraseCategory.REQUEST),
+        ("REQUEST_NURSE", "간호사 불러 주세요", PhraseCategory.REQUEST),
+        ("REQUEST_GUARDIAN", "보호자 불러 주세요", PhraseCategory.REQUEST),
+        ("REQUEST_REPOSITION", "자세 바꿔 주세요", PhraseCategory.REQUEST),
+        (
+            "SYMPTOM_BREATHING_DIFFICULTY",
+            "숨 쉬기 힘들어요",
+            PhraseCategory.ETC,
+        ),
+        ("SYMPTOM_DIZZINESS", "어지러워요", PhraseCategory.ETC),
+        ("SYMPTOM_NAUSEA", "토할 것 같아요", PhraseCategory.ETC),
         ("STATE_COLD", "추워요", PhraseCategory.ETC),
         ("STATE_HOT", "더워요", PhraseCategory.ETC),
-        ("REQUEST_LIGHTS_OFF", "불 꺼 주세요", PhraseCategory.REQUEST),
+        ("SYMPTOM_PHLEGM", "가래가 있어요", PhraseCategory.ETC),
+        ("REQUEST_HELP", "도와주세요", PhraseCategory.REQUEST),
     )
 
-    phrase_codes = [phrase_code for phrase_code, _, _ in seed_demo_phrases.DEMO_PHRASES]
-    assert len(phrase_codes) == len(set(phrase_codes)) == 6
+    phrase_codes = [
+        phrase_code for phrase_code, _, _ in sync_closed_phrases.CLOSED_PHRASES
+    ]
+    phrase_texts = [
+        phrase_text for _, phrase_text, _ in sync_closed_phrases.CLOSED_PHRASES
+    ]
+    assert len(phrase_codes) == len(set(phrase_codes)) == 15
+    assert len(phrase_texts) == len(set(phrase_texts)) == 15
 
 
 @pytest.mark.parametrize(("value", "expected"), [("1", 1), ("42", 42)])
