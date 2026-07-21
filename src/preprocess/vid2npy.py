@@ -13,10 +13,10 @@ PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
 
 
 def process_video(video_path, landmarker):
-    lips = crop_lip_frames(video_path, landmarker)
+    lips, opennesses = crop_lip_frames(video_path, landmarker)
     if not lips:
         return None
-    return normalize_frames(lips)
+    return normalize_frames(lips, opennesses)
 
 
 def run_batch(raw_dir=RAW_DIR, processed_dir=PROCESSED_DIR):
