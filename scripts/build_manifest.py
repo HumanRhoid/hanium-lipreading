@@ -8,6 +8,7 @@
 
 결과: data/manifest.csv  (clip_path, label_id, label_text, speaker_id, take)
 """
+
 import csv
 from pathlib import Path
 
@@ -70,7 +71,9 @@ def build(processed_dir=PROCESSED_DIR, manifest_path=MANIFEST_PATH):
             writer.writerow({**r, "label_id": label_to_id[r["label_text"]]})
 
     print(f"매니페스트 생성: {manifest_path}")
-    print(f"  클립 {len(rows)}개 · 문구 {len(labels)}개 · 화자 {len({r['speaker_id'] for r in rows})}명")
+    print(
+        f"  클립 {len(rows)}개 · 문구 {len(labels)}개 · 화자 {len({r['speaker_id'] for r in rows})}명"
+    )
     print("  라벨 매핑:", ", ".join(f"{i}={t}" for t, i in label_to_id.items()))
     if skipped:
         print(f"  [주의] 규칙 불일치로 건너뜀 {len(skipped)}개:", ", ".join(skipped))

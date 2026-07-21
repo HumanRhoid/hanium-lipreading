@@ -22,7 +22,7 @@ def to_grayscale_clahe(frame):
 
 # 발화 구간 검출 설정
 ACTIVE_RATIO = 0.3  # (max-min) 대비 이 비율 이상 벌어지면 '발화 중'으로 간주
-TRIM_MARGIN = 2     # 발화 구간 앞뒤로 남길 여유 프레임
+TRIM_MARGIN = 2  # 발화 구간 앞뒤로 남길 여유 프레임
 
 
 def trim_to_speech(frames, opennesses, active_ratio=ACTIVE_RATIO, margin=TRIM_MARGIN):
