@@ -255,12 +255,9 @@ docker compose stop postgres-test
 | `develop` | 개발 통합 (PR 도착지) | `develop` |
 | `feature/` | 새 기능 개발 | `feature/preprocess-roi`, `feature/train-loop` |
 | `fix/` | 버그 수정 (개발 중) | `fix/fps-mismatch`, `fix/label-parse` |
-| `docs/` | 문서 작성·정리 | `docs/pr-template-guide` |
-| `chore/` | 설정·저장소 관리 | `chore/update-gitignore` |
 
-> 흐름: `feature/*` / `fix/*` / `docs/*` → PR → `develop` → 안정화 후 → `main`
-> 커밋 컨벤션: `feat / fix / docs / refactor / design / chore / test`
-> PR 작성 기준: [docs/pr-guide.md](docs/pr-guide.md)
+> 흐름: `feature/*` → PR → `develop` → 안정화 후 → `main`
+> 커밋 컨벤션: `Feat / Fix / Design / Refactor / Chore / Docs`
 
 ---
 
