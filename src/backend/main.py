@@ -2,7 +2,6 @@
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
-from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,17 +13,17 @@ from src.backend.recognition.adapters.inference import (
     FakeSyncPredictor,
     UnavailableRecognitionGateway,
 )
-from src.backend.recognition.ports import (
-    RecognitionGateway,
-    RecognitionRepository,
-    FrameValidator,
-)
 from src.backend.recognition.adapters.media import JpegFrameValidator
 from src.backend.recognition.adapters.repository import (
     SQLAlchemyRecognitionRepository,
 )
 from src.backend.recognition.api import router as recognition_router
 from src.backend.recognition.domain import INPUT_FRAME_HEIGHT, INPUT_FRAME_WIDTH
+from src.backend.recognition.ports import (
+    FrameValidator,
+    RecognitionGateway,
+    RecognitionRepository,
+)
 from src.backend.recognition.service import NoopTextCorrector, RecognitionService
 
 CloseCallback = Callable[[], Awaitable[None]]

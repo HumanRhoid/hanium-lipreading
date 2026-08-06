@@ -43,14 +43,13 @@ class RecognitionSession(Base):
         # DB 수준에서 Check 기능을 제공하여
         # mode와 ended_at의 유효성을 보장한다
         # 이름 자동 조합
-
-# database.py
-# "ck": "ck_%(table_name)s_%(constraint_name)s"
-    #    ↓
-# name="mode" + table="session" → ck_session_mode
+        # database.py
+        # "ck": "ck_%(table_name)s_%(constraint_name)s"
+        #    ↓
+        # name="mode" + table="session" → ck_session_mode
         CheckConstraint("mode IN ('CLOSED', 'OPEN')", name="mode"),
         # -- 생성되는 SQL
-# CONSTRAINT ck_session_mode CHECK (mode IN ('CLOSED','OPEN'))
+        # CONSTRAINT ck_session_mode CHECK (mode IN ('CLOSED','OPEN'))
         #    ↑ 이 이름이 붙음
         CheckConstraint(
             "ended_at IS NULL OR ended_at >= started_at",
