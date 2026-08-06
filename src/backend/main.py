@@ -14,6 +14,11 @@ from src.backend.recognition.adapters.inference import (
     FakeSyncPredictor,
     UnavailableRecognitionGateway,
 )
+from src.backend.recognition.ports import (
+    RecognitionGateway,
+    RecognitionRepository,
+    FrameValidator,
+)
 from src.backend.recognition.adapters.media import JpegFrameValidator
 from src.backend.recognition.adapters.repository import (
     SQLAlchemyRecognitionRepository,
@@ -23,6 +28,7 @@ from src.backend.recognition.domain import INPUT_FRAME_HEIGHT, INPUT_FRAME_WIDTH
 from src.backend.recognition.service import NoopTextCorrector, RecognitionService
 
 CloseCallback = Callable[[], Awaitable[None]]
+# → 정리해야 할 close() 함수들을 리스트에 모아뒀다가, 종료 시 한꺼번에 실행.
 
 
 async def _call_close(close: CloseCallback) -> None:
@@ -100,25 +106,33 @@ def create_gateway(settings: Settings):
     return UnavailableRecognitionGateway()
 
 
+# create_app에 port로 부터 프레임 조건 추가 및 타입 힌트 추가
 def create_app(
     *,
     settings: Settings | None = None,
-    database=None,
-    repository=None,
-    gateway=None,
-    frame_validator=None,
+    database: SQLAlchemyDatabase | None = None,
+    repository: RecognitionRepository | None = None,
+    gateway: RecognitionGateway | None = None,
+    frame_validator: FrameValidator | None = None,
 ) -> FastAPI:
-    """운영 구현과 테스트 대역을 주입할 수 있는 애플리케이션을 생성한다."""
-
+    """운영 구현과
+    테스트 대역을 주입할 수 있는
+    애플리케이션을 생성한다.
+    """
     app_settings = settings or Settings()
 
-    @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         dependency_closes: list[CloseCallback] = []
-        database_close: CloseCallback | None = None
         lifecycle_errors: list[BaseException] = []
+        database_close: CloseCallback | None = None
         app.state.draining = True
         try:
+            # 데베 연결 (SQLAlchemyDatabase)과 repository는
+            # lifespan에서 생성하고,
+            # lifespan 종료 시점에 close()를 호출한다.
+            # 삼항연산자로 database와 repository가
+            # None이면 기본 구현을 생성하고,
+            # None이 아니면 주입된 구현을 사용한다.
             app_database = (
                 database if database is not None else SQLAlchemyDatabase(app_settings)
             )
