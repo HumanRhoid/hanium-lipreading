@@ -42,3 +42,6 @@ htmlcov/
 Thumbs.db
 .vscode/
 .idea/
+
+# ── 기타 ──
+*.sql
