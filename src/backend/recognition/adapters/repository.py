@@ -31,16 +31,35 @@ from src.backend.recognition.domain import (
 )
 from src.backend.recognition.errors import SessionAlreadyEndedError
 
+# 테이블 정의와 repository 구현을 한 파일에 두는 이유:
+# - SQLAlchemy ORM은 당연히 테이블 정의와 repository 구현이 강하게 결합되어 있다
+
 
 class RecognitionSession(Base):
+    # 알케미에선 __tablename__과 __table_args__를 클래스 속성으로 정의해야
+    # 테이블 생성 시점에 제약조건과 인덱스가 적용된다
     __tablename__ = "session"
     __table_args__ = (
+        # DB 수준에서 Check 기능을 제공하여
+        # mode와 ended_at의 유효성을 보장한다
+        # 이름 자동 조합
+        # database.py
+        # "ck": "ck_%(table_name)s_%(constraint_name)s"
+        #    ↓
+        # name="mode" + table="session" → ck_session_mode
         CheckConstraint("mode IN ('CLOSED', 'OPEN')", name="mode"),
+        # -- 생성되는 SQL
+        # CONSTRAINT ck_session_mode CHECK (mode IN ('CLOSED','OPEN'))
+        #    ↑ 이 이름이 붙음
         CheckConstraint(
             "ended_at IS NULL OR ended_at >= started_at",
             name="ended_after_started",
         ),
+        # -- 생성되는 SQL
+        # CHECK (ended_at IS NULL OR ended_at >= started_at)
         Index("ix_session_started_at", "started_at"),
+        # -- 생성되는 SQL
+        # CREATE INDEX ix_session_started_at ON session (started_at);
     )
 
     session_id: Mapped[int] = mapped_column(Integer, Identity(), primary_key=True)

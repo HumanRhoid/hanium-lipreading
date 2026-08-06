@@ -48,3 +48,10 @@ class TextCorrector(Protocol):
     """인식 원문을 선택적으로 교정하는 포트."""
 
     async def correct(self, text: str) -> str | None: ...
+
+
+class FrameValidator(Protocol):
+    """전송된 프레임이 입력 계약을 만족하는지 검증하는 포트."""
+
+    async def validate(self, frame: bytes) -> None: ...
+    async def close(self) -> None: ...
