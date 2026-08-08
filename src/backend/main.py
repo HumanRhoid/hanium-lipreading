@@ -119,7 +119,8 @@ def create_app(
     테스트 대역을 주입할 수 있는
     애플리케이션을 생성한다.
     """
-    app_settings = settings or Settings() 
+    app_settings = settings or Settings()
+
     # settings가 None이면 기본 Settings()를 사용
     # 아니라면 주입된 settings를 사용
     @asynccontextmanager
@@ -207,7 +208,7 @@ def create_app(
         # allow_methods=["GET"], 수정
         # preflight와 이미지 및 프레임 데이터를 고려하면
         # POST, OPTIONS도 허용해야 한다
-        allow_methods=["GET", "POST", "OPTIONS"], # 또는 ["*"]
+        allow_methods=["GET", "POST", "OPTIONS"],  # 또는 ["*"]
         allow_headers=["*"],
     )
 
