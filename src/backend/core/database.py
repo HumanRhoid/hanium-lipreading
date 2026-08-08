@@ -27,7 +27,11 @@ class Base(DeclarativeBase):
 
 
 class SQLAlchemyDatabase:
-    """요청 간 공유하는 engine과 짧은 DB session factory를 소유한다."""
+    """요청 간 공유하는 engine과 짧은 DB session
+    (본 서버가 DB서버에 연결을 성공한 시점부터
+    쿼리를 실행하고 나갈 때꺼지 상호작용 하는
+    논리적인 연결상태와 작업단위)
+    factory를 소유한다."""
 
     def __init__(self, settings: Settings):
         self.engine: AsyncEngine = create_async_engine(
