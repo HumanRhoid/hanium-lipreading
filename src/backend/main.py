@@ -1,7 +1,8 @@
 """FastAPI 애플리케이션 진입점."""
 
 import asyncio
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -118,9 +119,11 @@ def create_app(
     테스트 대역을 주입할 수 있는
     애플리케이션을 생성한다.
     """
-    app_settings = settings or Settings()
-
-    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    app_settings = settings or Settings() 
+    # settings가 None이면 기본 Settings()를 사용
+    # 아니라면 주입된 settings를 사용
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         dependency_closes: list[CloseCallback] = []
         lifecycle_errors: list[BaseException] = []
         database_close: CloseCallback | None = None
@@ -201,7 +204,10 @@ def create_app(
         CORSMiddleware,
         allow_origins=app_settings.allowed_origins,
         allow_credentials=False,
-        allow_methods=["GET"],
+        # allow_methods=["GET"], 수정
+        # preflight와 이미지 및 프레임 데이터를 고려하면
+        # POST, OPTIONS도 허용해야 한다
+        allow_methods=["GET", "POST", "OPTIONS"], # 또는 ["*"]
         allow_headers=["*"],
     )
 
