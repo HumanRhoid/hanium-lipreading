@@ -10,7 +10,7 @@ torch = pytest.importorskip(
 
 @pytest.fixture(scope="module")
 def backbone():
-    from src.ml.model import LipReadingBackbone
+    from src.ml.models import LipReadingBackbone
 
     torch.manual_seed(0)
     return LipReadingBackbone()
