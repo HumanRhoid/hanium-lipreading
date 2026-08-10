@@ -27,8 +27,11 @@ from src.backend.recognition.ports import (
 )
 from src.backend.recognition.service import NoopTextCorrector, RecognitionService
 
+# Callable 타입 힌트 정의: close() 함수의 시그니처를 나타내며,
+# 반환값은 Awaitable[None]으로 비동기적으로 실행될 수 있는 함수임을 의미한다.
 CloseCallback = Callable[[], Awaitable[None]]
-# → 정리해야 할 close() 함수들을 리스트에 모아뒀다가, 종료 시 한꺼번에 실행.
+
+# → 정리해야 할 close() 함수들을 리스트에 모아뒀다가, 종료 시 close 함수들을 한꺼번에 실행.
 
 
 async def _call_close(close: CloseCallback) -> None:
@@ -120,11 +123,11 @@ def create_app(
     애플리케이션을 생성한다.
     """
     app_settings = settings or Settings()
-
     # settings가 None이면 기본 Settings()를 사용
     # 아니라면 주입된 settings를 사용
+
     @asynccontextmanager
-    async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:  # app이 켜지는 시점
         dependency_closes: list[CloseCallback] = []
         lifecycle_errors: list[BaseException] = []
         database_close: CloseCallback | None = None
@@ -161,6 +164,9 @@ def create_app(
             )
             dependency_closes.append(app_frame_validator.close)
 
+            # lifespan(app이 켜지는 시점)에서 생성한 객체들을 app.state에 저장하여
+            # FastAPI의 의존성 주입 시스템에서 사용할 수 있도록 한다.
+            # 이 과정은 단 1번만 수행되며, lifespan 종료 시점에 close()를 호출하여 자원을 정리한다.
             app.state.settings = app_settings
             app.state.database = app_database
             app.state.repository = app_repository
@@ -175,7 +181,9 @@ def create_app(
 
             await app_gateway.start()
             app.state.draining = False
+
             yield
+
         except BaseException as error:
             lifecycle_errors.append(error)
         finally:
@@ -196,11 +204,14 @@ def create_app(
 
         _raise_lifecycle_errors(lifecycle_errors)
 
+    # FastAPI 인스턴스를 생성. 프레임워크가 내부적으로 실행할 수 있도록
+    # lifespan context manager를 등록(전달)한다.
     app = FastAPI(
         title="한이음 립리딩 API",
         version="0.1.0",
         lifespan=lifespan,
     )
+    # CORS 미들웨어를 추가하여 프론트엔드와의 통신을 허용
     app.add_middleware(
         CORSMiddleware,
         allow_origins=app_settings.allowed_origins,
@@ -208,7 +219,7 @@ def create_app(
         # allow_methods=["GET"], 수정
         # preflight와 이미지 및 프레임 데이터를 고려하면
         # POST, OPTIONS도 허용해야 한다
-        allow_methods=["GET", "POST", "OPTIONS"],  # 또는 ["*"]
+        allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["*"],
     )
 

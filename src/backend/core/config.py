@@ -24,6 +24,7 @@ class Settings(BaseSettings):
         repr=False,
     )
     allowed_origins: list[str] = Field(
+        # 키워드 인자에 람다 할당. 기본값은 localhost:5173에서 오는 요청만 허용한다.
         default_factory=lambda: ["http://localhost:5173"]
     )
     inference_backend: Literal["fake", "unavailable"] = "unavailable"
@@ -41,7 +42,12 @@ class Settings(BaseSettings):
     database_pool_timeout_seconds: PositiveFloat = 10.0
 
     @field_validator("database_url")
+    # database_url 변수에 값이 할당될 때마다
+    # 아래 validate_database_url 메서드가 호출된다.
     @classmethod
+    # 자바나 C++의 static method와 유사.
+    # 객체 각각이 아닌 클래스에 종속되었기에
+    # 클래스 인스턴스가 없어도 호출 가능하다.
     def validate_database_url(cls, value: str) -> str:
         """동기 driver나 SQLite가 운영 경로에 섞이는 것을 방지한다."""
 

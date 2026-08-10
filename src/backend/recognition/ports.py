@@ -1,5 +1,6 @@
 """인식 애플리케이션과 외부 구현 사이의 포트."""
 
+# 프로토콜 상속 시 필수 메서드와 속성 정의
 from typing import Protocol
 
 from src.backend.recognition.domain import (
