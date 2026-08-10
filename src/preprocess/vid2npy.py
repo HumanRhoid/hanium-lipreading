@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import numpy as np
-
 from lip_crop import create_landmarker, crop_lip_frames
 from normalize import normalize_frames
 
@@ -14,10 +13,10 @@ PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
 
 
 def process_video(video_path, landmarker):
-    lips = crop_lip_frames(video_path, landmarker)
+    lips, opennesses = crop_lip_frames(video_path, landmarker)
     if not lips:
         return None
-    return normalize_frames(lips)
+    return normalize_frames(lips, opennesses)
 
 
 def run_batch(raw_dir=RAW_DIR, processed_dir=PROCESSED_DIR):
@@ -53,7 +52,9 @@ def run_batch(raw_dir=RAW_DIR, processed_dir=PROCESSED_DIR):
     finally:
         landmarker.close()
 
-    print(f"\n총 {len(video_paths)}개 중 처리 {processed} / 건너뜀 {skipped} / 실패 {failed}")
+    print(
+        f"\n총 {len(video_paths)}개 중 처리 {processed} / 건너뜀 {skipped} / 실패 {failed}"
+    )
 
 
 if __name__ == "__main__":

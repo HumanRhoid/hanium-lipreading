@@ -5,26 +5,54 @@ description = "Korean lipreading vision AI for closed-set phrase classification"
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
 dependencies = [
+    "alembic",
+    "asyncpg",
+    "fastapi",
     "numpy",
     "pandas",
     "opencv-python",
     "mediapipe",
+    "pydantic-settings",
+    "sqlalchemy[asyncio]",
     "tqdm",
     "scikit-learn",
     "tensorboard",
     "ffmpeg-python",
+    "uvicorn[standard]",
 ]
 
 [dependency-groups]
 dev = [
+    "httpx2",
     "ipykernel",
     "pytest",
+    "pytest-cov",
+    "pytest-asyncio",
+    "ruff",
 ]
+
+[tool.pytest.ini_options]
+addopts = [
+    "--strict-config",
+    "--strict-markers",
+]
+asyncio_mode = "auto"
+markers = [
+    "integration: 실제 PostgreSQL 등 외부 런타임이 필요한 통합 테스트",
+    "gpu: 실제 CUDA 또는 ROCm GPU가 필요한 테스트",
+]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+extend-select = ["I"]
 
 [tool.uv]
 package = false
 
 [tool.uv.sources]
-# PyTorch is intentionally not pinned here because the project uses GPU-specific
-# ROCm/CUDA wheels depending on each developer's machine. Install it separately
-# after `uv sync` using the command recommended by PyTorch/ROCm.
+# PyTorch는 개발자별 GPU 환경에 따라 ROCm/CUDA wheel이 달라 이 파일에 고정하지 않습니다.
+# `uv sync` 실행 후 PyTorch/ROCm 공식 안내에 맞는 패키지를 별도로 설치하세요.
