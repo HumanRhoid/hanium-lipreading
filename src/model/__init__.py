@@ -1,5 +1,6 @@
 """립리딩 모델을 구성하는 신경망 모듈."""
 
 from .backbone import LipReadingBackbone
+from .classification_head import ClassificationHead
 
-__all__ = ["LipReadingBackbone"]
+__all__ = ["ClassificationHead", "LipReadingBackbone"]
