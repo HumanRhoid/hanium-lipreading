@@ -59,7 +59,6 @@ class BasicBlock(nn.Module):
 
 class LipReadingBackbone(nn.Module):
     """입술 프레임마다 512차원 특징을 추출한다.
-
     입력 shape은 ``[배치, 3, 시간, 80, 112]``이고 출력 shape은
     ``[배치, 시간, 512]``이다. 시간축 길이는 축소하지 않는다.
     """
@@ -88,7 +87,6 @@ class LipReadingBackbone(nn.Module):
                 padding=(0, 1, 1),
             ),
         )
-
         self._resnet_channels = 64
         self.layer1 = self._make_layer(out_channels=64, block_count=2)
         self.layer2 = self._make_layer(out_channels=128, block_count=2, stride=2)

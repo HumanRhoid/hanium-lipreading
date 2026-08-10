@@ -10,7 +10,7 @@ torch = pytest.importorskip(
 
 @pytest.fixture
 def head():
-    from src.model import ClassificationHead
+    from src.ml.models import ClassificationHead
 
     torch.manual_seed(0)
     return ClassificationHead(input_dim=8, num_classes=4, dropout=0.0)
@@ -75,7 +75,7 @@ def test_head_propagates_gradients(head):
     ],
 )
 def test_head_rejects_invalid_configuration(kwargs, error_type, message):
-    from src.model import ClassificationHead
+    from src.ml.models import ClassificationHead
 
     with pytest.raises(error_type, match=message):
         ClassificationHead(**kwargs)

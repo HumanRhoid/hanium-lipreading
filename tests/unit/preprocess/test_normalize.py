@@ -1,6 +1,6 @@
 import numpy as np
 
-from src.preprocess.normalize import normalize_frames, to_grayscale_clahe
+from src.ml.preprocess.normalize import normalize_frames, to_grayscale_clahe
 
 
 def test_normalize_frames_returns_none_for_empty_input():
