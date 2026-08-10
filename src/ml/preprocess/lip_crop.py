@@ -5,7 +5,7 @@ import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_MODEL_PATH = PROJECT_ROOT / "models" / "face_landmarker.task"
 
 LIP_LANDMARKS = [

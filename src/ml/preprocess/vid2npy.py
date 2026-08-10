@@ -2,10 +2,10 @@ from pathlib import Path
 
 import numpy as np
 
-from ml.preprocess.lip_crop import create_landmarker, crop_lip_frames
-from ml.preprocess.normalize import normalize_frames
+from src.ml.preprocess.lip_crop import create_landmarker, crop_lip_frames
+from src.ml.preprocess.normalize import normalize_frames
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 VIDEO_EXTS = (".mp4", ".avi", ".mov")
 
