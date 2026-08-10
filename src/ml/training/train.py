@@ -8,7 +8,6 @@ import numpy as np
 import torch
 from torch import nn
 from torch.utils.data import DataLoader, Subset
-
 from src.ml.models import LipReadingModel
 from src.ml.preprocess.augmentation import VideoAugmentation
 from src.ml.training.dataset import (
@@ -18,8 +17,6 @@ from src.ml.training.dataset import (
 )
 
 DEFAULT_CHECKPOINT_PATH = Path("checkpoints/best.pt")
-
-
 def resolve_device(prefer_gpu=True):
     """사용 가능한 장치를 고른다. GPU가 있으면 GPU를 우선한다."""
     if prefer_gpu and torch.cuda.is_available():
