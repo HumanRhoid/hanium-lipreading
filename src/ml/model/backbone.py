@@ -6,9 +6,7 @@ from torch import nn
 
 class BasicBlock(nn.Module):
     """표준 ResNet 기본 잔차 블록."""
-
     expansion = 1
-
     def __init__(self, in_channels, out_channels, stride=1):
         super().__init__()
         self.conv1 = nn.Conv2d(
@@ -59,16 +57,13 @@ class BasicBlock(nn.Module):
 
 class LipReadingBackbone(nn.Module):
     """입술 프레임마다 512차원 특징을 추출한다.
-
     입력 shape은 ``[배치, 3, 시간, 80, 112]``이고 출력 shape은
     ``[배치, 시간, 512]``이다. 시간축 길이는 축소하지 않는다.
     """
-
     input_channels = 3
     input_height = 80
     input_width = 112
     feature_dim = 512
-
     def __init__(self):
         super().__init__()
         self.stem = nn.Sequential(
@@ -88,7 +83,6 @@ class LipReadingBackbone(nn.Module):
                 padding=(0, 1, 1),
             ),
         )
-
         self._resnet_channels = 64
         self.layer1 = self._make_layer(out_channels=64, block_count=2)
         self.layer2 = self._make_layer(out_channels=128, block_count=2, stride=2)
