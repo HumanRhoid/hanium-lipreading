@@ -2,5 +2,12 @@
 
 from .backbone import LipReadingBackbone
 from .classification_head import ClassificationHead
+from .lip_reading_model import LipReadingModel
+from .temporal import TemporalBiGRU
 
-__all__ = ["ClassificationHead", "LipReadingBackbone"]
+__all__ = [
+    "ClassificationHead",
+    "LipReadingBackbone",
+    "TemporalBiGRU",
+    "LipReadingModel",
+]
