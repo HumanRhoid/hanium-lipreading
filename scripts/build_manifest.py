@@ -11,6 +11,7 @@
 
 import csv
 from pathlib import Path
+import unicodedata
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
@@ -25,7 +26,7 @@ def parse_stem(stem):
     speaker, phrase, take = parts
     if not (speaker and phrase and take):
         return None
-    return speaker, phrase, take
+    return speaker, unicodedata.normalize("NFC", phrase), take
 
 
 def build(processed_dir=PROCESSED_DIR, manifest_path=MANIFEST_PATH):
