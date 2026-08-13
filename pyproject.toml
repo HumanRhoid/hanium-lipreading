@@ -19,6 +19,7 @@ dependencies = [
     "tensorboard",
     "ffmpeg-python",
     "uvicorn[standard]",
+    "pwdlib[argon2]>=0.3.1",
 ]
 
 [dependency-groups]
