@@ -20,6 +20,7 @@ dependencies = [
     "ffmpeg-python",
     "uvicorn[standard]",
     "pwdlib[argon2]>=0.3.1",
+    "torch",
 ]
 
 [dependency-groups]
@@ -54,6 +55,10 @@ extend-select = ["I"]
 [tool.uv]
 package = false
 
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
 [tool.uv.sources]
-# PyTorch는 개발자별 GPU 환경에 따라 ROCm/CUDA wheel이 달라 이 파일에 고정하지 않습니다.
-# `uv sync` 실행 후 PyTorch/ROCm 공식 안내에 맞는 패키지를 별도로 설치하세요.
+torch = { index = "pytorch-cpu" }

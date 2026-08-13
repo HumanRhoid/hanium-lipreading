@@ -2,7 +2,7 @@
 
 학습 코드에서는 다음과 같이 사용할 수 있습니다.
 
-    from src.preprocess.augmentation import (
+    from src.ml.preprocess.augmentation import (
         AugmentationConfig,
         AugmentationResult,
         VideoAugmentation,
