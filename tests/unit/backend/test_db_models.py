@@ -45,9 +45,7 @@ def test_session_matches_erd_contract():
         table,
         CheckConstraint,
     )
-    assert {index.name for index in table.indexes} == {
-        "ix_session_started_at"
-    }
+    assert {index.name for index in table.indexes} == {"ix_session_started_at"}
 
 
 def test_phrase_uses_stable_unique_code():
@@ -92,8 +90,7 @@ def test_utterance_matches_storage_and_deletion_contract():
     )
 
     foreign_keys = {
-        foreign_key.parent.name: foreign_key
-        for foreign_key in table.foreign_keys
+        foreign_key.parent.name: foreign_key for foreign_key in table.foreign_keys
     }
     assert foreign_keys["session_id"].ondelete == "CASCADE"
     assert foreign_keys["phrase_id"].ondelete == "SET NULL"
@@ -101,10 +98,7 @@ def test_utterance_matches_storage_and_deletion_contract():
 
 def test_utterance_has_session_created_at_index():
     indexes = {
-        index.name: tuple(
-            column.name
-            for column in index.columns
-        )
+        index.name: tuple(column.name for column in index.columns)
         for index in Utterance.__table__.indexes
     }
 

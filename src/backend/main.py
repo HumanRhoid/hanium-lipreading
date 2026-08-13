@@ -49,11 +49,7 @@ async def _collect_close_errors(
         return_exceptions=True,
     )
 
-    return tuple(
-        result
-        for result in results
-        if isinstance(result, BaseException)
-    )
+    return tuple(result for result in results if isinstance(result, BaseException))
 
 
 async def _cleanup_resources(
@@ -62,14 +58,10 @@ async def _cleanup_resources(
 ) -> tuple[BaseException, ...]:
     """실행 자원을 먼저 drain하고 DB engine은 마지막에 닫는다."""
 
-    errors = list(
-        await _collect_close_errors(dependency_closes)
-    )
+    errors = list(await _collect_close_errors(dependency_closes))
 
     if database_close is not None:
-        errors.extend(
-            await _collect_close_errors((database_close,))
-        )
+        errors.extend(await _collect_close_errors((database_close,)))
 
     return tuple(errors)
 
@@ -113,10 +105,7 @@ def _raise_lifecycle_errors(
     if len(errors) == 1:
         raise errors[0]
 
-    if all(
-        isinstance(error, Exception)
-        for error in errors
-    ):
+    if all(isinstance(error, Exception) for error in errors):
         raise ExceptionGroup(
             "애플리케이션 수명주기 오류",
             list(errors),
@@ -168,9 +157,7 @@ def create_app(
         try:
             # 실제 DB 또는 테스트에서 주입한 가짜 DB를 사용한다.
             app_database = (
-                database
-                if database is not None
-                else SQLAlchemyDatabase(app_settings)
+                database if database is not None else SQLAlchemyDatabase(app_settings)
             )
             database_close = app_database.close
 
@@ -178,9 +165,7 @@ def create_app(
             app_repository = (
                 repository
                 if repository is not None
-                else SQLAlchemyRecognitionRepository(
-                    app_database.session_factory
-                )
+                else SQLAlchemyRecognitionRepository(app_database.session_factory)
             )
 
             # 인증용 service
@@ -193,26 +178,17 @@ def create_app(
             app_auth_service = auth_service
             app_auth_repository = None
 
-            if (
-                app_auth_service is None
-                and hasattr(app_database, "session_factory")
-            ):
+            if app_auth_service is None and hasattr(app_database, "session_factory"):
                 app_auth_repository = SQLAlchemyAuthRepository(
                     app_database.session_factory
                 )
-                app_auth_service = AuthService(
-                    repository=app_auth_repository
-                )
+                app_auth_service = AuthService(repository=app_auth_repository)
 
             # 립리딩 추론 gateway
             app_gateway = (
-                gateway
-                if gateway is not None
-                else create_gateway(app_settings)
+                gateway if gateway is not None else create_gateway(app_settings)
             )
-            dependency_closes.append(
-                app_gateway.close
-            )
+            dependency_closes.append(app_gateway.close)
 
             # 입력 프레임 검증기
             app_frame_validator = (
@@ -223,9 +199,7 @@ def create_app(
                     height=INPUT_FRAME_HEIGHT,
                 )
             )
-            dependency_closes.append(
-                app_frame_validator.close
-            )
+            dependency_closes.append(app_frame_validator.close)
 
             # 공통
             app.state.settings = app_settings
@@ -258,37 +232,22 @@ def create_app(
         finally:
             app.state.draining = True
 
-        if (
-            dependency_closes
-            or database_close is not None
-        ):
+        if dependency_closes or database_close is not None:
             cleanup_task = asyncio.create_task(
                 _cleanup_resources(
-                    tuple(
-                        reversed(dependency_closes)
-                    ),
+                    tuple(reversed(dependency_closes)),
                     database_close,
                 )
             )
 
-            close_errors, cancellation = (
-                await _wait_for_cleanup(
-                    cleanup_task
-                )
-            )
+            close_errors, cancellation = await _wait_for_cleanup(cleanup_task)
 
             if cancellation is not None:
-                lifecycle_errors.append(
-                    cancellation
-                )
+                lifecycle_errors.append(cancellation)
 
-            lifecycle_errors.extend(
-                close_errors
-            )
+            lifecycle_errors.extend(close_errors)
 
-        _raise_lifecycle_errors(
-            lifecycle_errors
-        )
+        _raise_lifecycle_errors(lifecycle_errors)
 
     app = FastAPI(
         title="한이음 립리딩 API",

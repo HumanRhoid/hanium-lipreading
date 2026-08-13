@@ -15,7 +15,7 @@ from alembic import command
 pytestmark = pytest.mark.integration
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-MANAGED_TABLES = {"session", "phrase", "utterance"}
+MANAGED_TABLES = {"session", "phrase", "utterance", "users", "login_session"}
 
 
 def _alembic_config() -> Config:
@@ -33,6 +33,8 @@ async def _drop_managed_tables(database_url: str) -> None:
             actual_database = await connection.scalar(text("SELECT current_database()"))
             if actual_database != make_url(database_url).database:
                 raise RuntimeError("연결된 DB가 TEST_DATABASE_URL과 다릅니다")
+            await connection.execute(text("DROP TABLE IF EXISTS login_session CASCADE"))
+            await connection.execute(text("DROP TABLE IF EXISTS users CASCADE"))
             await connection.execute(text("DROP TABLE IF EXISTS utterance CASCADE"))
             await connection.execute(text("DROP TABLE IF EXISTS phrase CASCADE"))
             await connection.execute(text('DROP TABLE IF EXISTS "session" CASCADE'))

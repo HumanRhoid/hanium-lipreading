@@ -99,9 +99,7 @@ class AuthService:
     ) -> User:
         """유효한 로그인 세션으로 현재 사용자를 조회한다."""
 
-        user = await self._repository.get_user_by_active_session_token(
-            session_token
-        )
+        user = await self._repository.get_user_by_active_session_token(session_token)
 
         if user is None:
             raise InvalidSessionError
@@ -114,9 +112,7 @@ class AuthService:
     ) -> None:
         """현재 로그인 세션을 무효화한다."""
 
-        revoked = await self._repository.revoke_login_session(
-            session_token
-        )
+        revoked = await self._repository.revoke_login_session(session_token)
 
         if not revoked:
             raise InvalidSessionError

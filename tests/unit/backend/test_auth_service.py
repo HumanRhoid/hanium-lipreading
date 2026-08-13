@@ -102,10 +102,7 @@ class FakeAuthRepository:
     ) -> bool:
         login_session = self.sessions.get(session_token)
 
-        if (
-            login_session is None
-            or login_session.revoked_at is not None
-        ):
+        if login_session is None or login_session.revoked_at is not None:
             return False
 
         login_session.revoked_at = datetime.now(timezone.utc)
@@ -231,9 +228,7 @@ async def test_current_user_is_found_by_session_token(
         password="test12345",
     )
 
-    current_user = await auth_service.get_current_user(
-        login_session.session_token
-    )
+    current_user = await auth_service.get_current_user(login_session.session_token)
 
     assert current_user.user_id == user.user_id
     assert current_user.username == "testuser1"

@@ -22,9 +22,7 @@ class User(Base):
     """의료진 회원 정보를 저장하는 사용자 모델."""
 
     __tablename__ = "users"
-    __table_args__ = (
-        UniqueConstraint("username"),
-    )
+    __table_args__ = (UniqueConstraint("username"),)
 
     user_id: Mapped[int] = mapped_column(
         Integer,
@@ -68,9 +66,7 @@ class LoginSession(Base):
     """로그인 상태를 저장하는 세션 모델."""
 
     __tablename__ = "login_session"
-    __table_args__ = (
-        UniqueConstraint("session_token"),
-    )
+    __table_args__ = (UniqueConstraint("session_token"),)
 
     login_session_id: Mapped[int] = mapped_column(
         Integer,
