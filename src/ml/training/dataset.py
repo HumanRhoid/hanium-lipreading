@@ -69,6 +69,9 @@ class LipReadingDataset(Dataset):
         clip = np.load(self.data_root / row["clip_path"])
 
         if self.augmentation is not None:
+            # DataLoader worker는 증강기를 복사해 가므로 난수 상태도 함께 복제된다.
+            # 호출마다 새 시드를 넣어 worker와 에폭에 걸쳐 변형이 반복되지 않게 한다.
+            self.augmentation.rng = np.random.default_rng()
             clip = self.augmentation(clip)
 
         # (T, H, W, C) uint8 → [C, T, H, W] float

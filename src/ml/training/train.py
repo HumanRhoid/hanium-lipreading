@@ -133,6 +133,8 @@ def train(
     model = LipReadingModel(num_classes=num_classes).to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+    # 후반으로 갈수록 보폭을 좁혀 검증 손실이 급등하는 구간을 줄인다.
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
     print(f"장치: {device} | 클래스: {num_classes}개")
     print(f"학습 {len(train_indices)}개 · 검증 {len(val_indices)}개 클립")
@@ -146,11 +148,13 @@ def train(
             model, train_loader, criterion, device, optimizer
         )
         val_loss, val_accuracy = run_epoch(model, val_loader, criterion, device)
+        scheduler.step()
 
         print(
             f"[{epoch:3d}/{epochs}] "
             f"train loss {train_loss:.4f} acc {train_accuracy:.3f} | "
-            f"val loss {val_loss:.4f} acc {val_accuracy:.3f}"
+            f"val loss {val_loss:.4f} acc {val_accuracy:.3f} | "
+            f"lr {scheduler.get_last_lr()[0]:.2e}"
         )
 
         if val_accuracy >= best_accuracy:
