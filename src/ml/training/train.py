@@ -50,22 +50,31 @@ def start_tracking(project, run_name, config):
     return wandb
 
 
-def split_by_speaker(dataset, val_ratio=0.2, seed=42):
+def split_by_speaker(dataset, val_ratio=0.2, seed=42, val_speakers=None):
     """화자 단위로 학습·검증 인덱스를 나눈다.
 
     같은 화자의 클립이 양쪽에 섞이면 검증 정확도가 부풀려지므로
     화자를 통째로 한쪽에만 배치한다.
+
+    ``val_speakers``를 지정하면 그 화자를 검증으로 쓴다. 화자 구성이 바뀌면
+    무작위 선택 결과도 달라져 실험 간 비교가 깨지므로, 교차검증이나
+    설정 비교에서는 검증 화자를 고정하는 편이 안전하다.
     """
     speakers = sorted(set(dataset.speaker_ids))
     if len(speakers) < 2:
         raise ValueError("화자 분리 분할에는 화자가 둘 이상 필요합니다")
 
-    rng = random.Random(seed)
-    shuffled = speakers.copy()
-    rng.shuffle(shuffled)
-
-    val_size = max(1, round(len(shuffled) * val_ratio))
-    val_speakers = set(shuffled[:val_size])
+    if val_speakers is None:
+        rng = random.Random(seed)
+        shuffled = speakers.copy()
+        rng.shuffle(shuffled)
+        val_size = max(1, round(len(shuffled) * val_ratio))
+        val_speakers = set(shuffled[:val_size])
+    else:
+        val_speakers = set(val_speakers)
+        unknown = val_speakers - set(speakers)
+        if unknown:
+            raise ValueError(f"매니페스트에 없는 화자입니다: {sorted(unknown)}")
 
     train_indices = [
         index
@@ -80,7 +89,9 @@ def split_by_speaker(dataset, val_ratio=0.2, seed=42):
 
     if not train_indices:
         raise ValueError("학습 분할이 비었습니다. val_ratio를 낮추세요")
-    return train_indices, val_indices
+    if not val_indices:
+        raise ValueError(f"검증 분할이 비었습니다: {sorted(val_speakers)}")
+    return train_indices, val_indices, sorted(val_speakers)
 
 
 def run_epoch(model, loader, criterion, device, optimizer=None):
@@ -119,6 +130,7 @@ def train(
     batch_size=4,
     learning_rate=1e-4,
     val_ratio=0.2,
+    val_speakers=None,
     seed=42,
     checkpoint_path=DEFAULT_CHECKPOINT_PATH,
     num_workers=0,
@@ -153,7 +165,6 @@ def train(
         "pretrained": pretrained,
         "freeze_backbone": freeze_backbone,
     }
-    tracker = start_tracking(wandb_project, run_name, config)
 
     # 증강은 학습 분할에만 적용한다. 검증은 원본이어야 성능을 정직하게 잰다.
     augmentation = (
@@ -169,7 +180,13 @@ def train(
     plain = LipReadingDataset(manifest_path, data_root, imagenet_norm=pretrained)
     num_classes = len({row["label_id"] for row in plain.rows})
 
-    train_indices, val_indices = split_by_speaker(plain, val_ratio, seed)
+    train_indices, val_indices, held_out = split_by_speaker(
+        plain, val_ratio, seed, val_speakers
+    )
+    # 검증 화자가 정해진 뒤에 기록을 시작해야 실험 간 비교 기준이 남는다.
+    config["val_speakers"] = ",".join(held_out)
+    tracker = start_tracking(wandb_project, run_name, config)
+
     train_loader = DataLoader(
         Subset(train_dataset, train_indices),
         batch_size=batch_size,
@@ -203,7 +220,10 @@ def train(
     total_count = sum(p.numel() for p in model.parameters())
 
     print(f"장치: {device} | 클래스: {num_classes}개")
-    print(f"학습 {len(train_indices)}개 · 검증 {len(val_indices)}개 클립")
+    print(
+        f"학습 {len(train_indices)}개 · 검증 {len(val_indices)}개 클립 "
+        f"| 검증 화자 {held_out}"
+    )
     print(
         f"모델 hidden {hidden_dim} · layer {num_layer} · dropout {dropout} "
         f"· wd {weight_decay} | 증강 {'켬' if augment else '끔'} "
@@ -291,6 +311,12 @@ def parse_args():
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--learning-rate", type=float, default=1e-4)
     parser.add_argument("--val-ratio", type=float, default=0.2)
+    parser.add_argument(
+        "--val-speakers",
+        nargs="+",
+        default=None,
+        help="검증에 쓸 화자를 직접 지정한다. 예) --val-speakers s04",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CHECKPOINT_PATH)
     parser.add_argument("--num-workers", type=int, default=0)
@@ -333,6 +359,7 @@ def main():
         batch_size=args.batch_size,
         learning_rate=args.learning_rate,
         val_ratio=args.val_ratio,
+        val_speakers=args.val_speakers,
         seed=args.seed,
         checkpoint_path=args.checkpoint,
         num_workers=args.num_workers,
