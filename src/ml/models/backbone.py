@@ -68,7 +68,7 @@ class LipReadingBackbone(nn.Module):
     input_width = 112
     feature_dim = 512
 
-    def __init__(self):
+    def __init__(self, pretrained=False):
         super().__init__()
         self.stem = nn.Sequential(
             nn.Conv3d(
@@ -95,6 +95,36 @@ class LipReadingBackbone(nn.Module):
         self.spatial_pool = nn.AdaptiveAvgPool2d((1, 1))
 
         self._initialize_weights()
+        if pretrained:
+            self.load_imagenet_weights()
+
+    def load_imagenet_weights(self):
+        """ImageNet 학습 가중치를 layer1~layer4에 옮긴다.
+
+        3D stem과 첫 2D 합성곱(``conv1``)은 대응하는 층이 없어 제외된다.
+        ``conv1``만 원본 색을 직접 다루므로, 흑백 입력이어도 옮겨지는
+        층들은 형태와 질감을 처리하는 부분이라 그대로 쓸 수 있다.
+        """
+        try:
+            from torchvision.models import ResNet18_Weights, resnet18
+        except ImportError:
+            print("[알림] torchvision이 없어 사전학습 가중치를 건너뜁니다.")
+            return 0
+
+        source = resnet18(weights=ResNet18_Weights.IMAGENET1K_V1).state_dict()
+        transferable = {
+            key: value
+            for key, value in source.items()
+            if key.startswith(("layer1.", "layer2.", "layer3.", "layer4."))
+        }
+
+        missing, unexpected = self.load_state_dict(transferable, strict=False)
+        if unexpected:
+            raise RuntimeError(f"구조가 어긋난 가중치가 있습니다: {unexpected[:3]}")
+
+        moved = sum(value.numel() for value in transferable.values())
+        print(f"ImageNet 가중치 이식: 텐서 {len(transferable)}개 · {moved / 1e6:.2f}M")
+        return len(transferable)
 
     def _make_layer(self, out_channels, block_count, stride=1):
         blocks = [BasicBlock(self._resnet_channels, out_channels, stride=stride)]

@@ -15,6 +15,10 @@ DEFAULT_MANIFEST_PATH = DEFAULT_DATA_ROOT / "manifest.csv"
 
 PIXEL_MAX = 255.0
 
+# ImageNet 사전학습 가중치는 이 분포로 정규화된 입력을 전제한다.
+IMAGENET_MEAN = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1, 1)
+IMAGENET_STD = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1, 1)
+
 
 def load_manifest(manifest_path):
     """매니페스트 CSV를 읽어 클립 정보 목록으로 반환한다."""
@@ -46,6 +50,7 @@ class LipReadingDataset(Dataset):
         manifest_path: 매니페스트 CSV 경로.
         data_root: ``clip_path``의 기준이 되는 데이터 폴더.
         augmentation: 학습용 증강기. ``None``이면 증강하지 않는다.
+        imagenet_norm: ImageNet 분포로 정규화할지 여부. 사전학습 백본과 함께 켠다.
     """
 
     def __init__(
@@ -53,6 +58,7 @@ class LipReadingDataset(Dataset):
         manifest_path=DEFAULT_MANIFEST_PATH,
         data_root=DEFAULT_DATA_ROOT,
         augmentation=None,
+        imagenet_norm=False,
     ):
         if augmentation is not None and not isinstance(augmentation, VideoAugmentation):
             raise TypeError("augmentation must be a VideoAugmentation or None")
@@ -60,6 +66,7 @@ class LipReadingDataset(Dataset):
         self.data_root = Path(data_root)
         self.rows = load_manifest(manifest_path)
         self.augmentation = augmentation
+        self.imagenet_norm = imagenet_norm
 
     def __len__(self):
         return len(self.rows)
@@ -77,6 +84,9 @@ class LipReadingDataset(Dataset):
         # (T, H, W, C) uint8 → [C, T, H, W] float
         frames = torch.from_numpy(np.ascontiguousarray(clip))
         frames = frames.permute(3, 0, 1, 2).float().div_(PIXEL_MAX)
+
+        if self.imagenet_norm:
+            frames = (frames - IMAGENET_MEAN) / IMAGENET_STD
 
         label = torch.tensor(int(row["label_id"]), dtype=torch.long)
         return frames, label
