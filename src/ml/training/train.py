@@ -131,6 +131,7 @@ def train(
     augment=True,
     augmentation_config=None,
     pretrained=False,
+    freeze_backbone=False,
     wandb_project=None,
     run_name=None,
 ):
@@ -150,6 +151,7 @@ def train(
         "smoothing": smoothing,
         "augment": augment,
         "pretrained": pretrained,
+        "freeze_backbone": freeze_backbone,
     }
     tracker = start_tracking(wandb_project, run_name, config)
 
@@ -186,13 +188,19 @@ def train(
         num_layer=num_layer,
         dropout=dropout,
         pretrained=pretrained,
+        freeze_backbone=freeze_backbone,
     ).to(device)
     criterion = nn.CrossEntropyLoss()
+    # 동결된 파라미터는 옵티마이저에 넣지 않는다.
+    trainable = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(
-        model.parameters(), lr=learning_rate, weight_decay=weight_decay
+        trainable, lr=learning_rate, weight_decay=weight_decay
     )
     # 후반으로 갈수록 보폭을 좁혀 검증 손실이 급등하는 구간을 줄인다.
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+
+    trainable_count = sum(p.numel() for p in trainable)
+    total_count = sum(p.numel() for p in model.parameters())
 
     print(f"장치: {device} | 클래스: {num_classes}개")
     print(f"학습 {len(train_indices)}개 · 검증 {len(val_indices)}개 클립")
@@ -200,6 +208,10 @@ def train(
         f"모델 hidden {hidden_dim} · layer {num_layer} · dropout {dropout} "
         f"· wd {weight_decay} | 증강 {'켬' if augment else '끔'} "
         f"· 사전학습 {'켬' if pretrained else '끔'} "
+        f"· 동결 {'켬' if freeze_backbone else '끔'}"
+    )
+    print(
+        f"학습 파라미터 {trainable_count / 1e6:.2f}M / 전체 {total_count / 1e6:.2f}M "
         f"| 저장 기준 최근 {smoothing}에폭 평균"
     )
 
@@ -298,6 +310,11 @@ def parse_args():
         help="ImageNet 가중치로 백본을 초기화한다",
     )
     parser.add_argument(
+        "--freeze-backbone",
+        action="store_true",
+        help="ResNet 층을 고정하고 stem·GRU·헤드만 학습한다",
+    )
+    parser.add_argument(
         "--wandb-project", default=None, help="지정하면 W&B로 실험을 기록한다"
     )
     parser.add_argument("--run-name", default=None, help="W&B 실행 이름")
@@ -327,6 +344,7 @@ def main():
         smoothing=args.smoothing,
         augment=not args.no_augment,
         pretrained=args.pretrained,
+        freeze_backbone=args.freeze_backbone,
         wandb_project=args.wandb_project,
         run_name=args.run_name,
     )

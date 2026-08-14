@@ -126,6 +126,20 @@ class LipReadingBackbone(nn.Module):
         print(f"ImageNet 가중치 이식: 텐서 {len(transferable)}개 · {moved / 1e6:.2f}M")
         return len(transferable)
 
+    def freeze_resnet(self):
+        """ResNet 층을 고정한다. 3D stem은 사전학습 대응물이 없어 계속 학습한다.
+
+        데이터가 적을 때 이식한 특징 추출기가 흐트러지는 것을 막는다.
+        """
+        frozen = 0
+        for layer in (self.layer1, self.layer2, self.layer3, self.layer4):
+            for parameter in layer.parameters():
+                parameter.requires_grad = False
+                frozen += parameter.numel()
+
+        print(f"ResNet 층 동결: {frozen / 1e6:.2f}M 파라미터")
+        return frozen
+
     def _make_layer(self, out_channels, block_count, stride=1):
         blocks = [BasicBlock(self._resnet_channels, out_channels, stride=stride)]
         self._resnet_channels = out_channels * BasicBlock.expansion
