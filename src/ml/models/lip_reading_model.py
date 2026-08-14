@@ -17,9 +17,12 @@ class LipReadingModel(nn.Module):
         num_layer=2,
         dropout=0.2,
         pretrained=False,
+        freeze_backbone=False,
     ):
         super().__init__()
         self.backbone = LipReadingBackbone(pretrained=pretrained)
+        if freeze_backbone:
+            self.backbone.freeze_resnet()
         self.temporal = TemporalBiGRU(
             input_dim=self.backbone.feature_dim,
             hidden_dim=hidden_dim,
