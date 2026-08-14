@@ -2,6 +2,7 @@
 
 import argparse
 import random
+from collections import deque
 from pathlib import Path
 
 import numpy as np
@@ -107,6 +108,11 @@ def train(
     checkpoint_path=DEFAULT_CHECKPOINT_PATH,
     num_workers=0,
     prefer_gpu=True,
+    hidden_dim=256,
+    num_layer=2,
+    dropout=0.2,
+    weight_decay=0.01,
+    smoothing=3,
 ):
     set_seed(seed)
     device = resolve_device(prefer_gpu)
@@ -130,18 +136,31 @@ def train(
         num_workers=num_workers,
     )
 
-    model = LipReadingModel(num_classes=num_classes).to(device)
+    model = LipReadingModel(
+        num_classes=num_classes,
+        hidden_dim=hidden_dim,
+        num_layer=num_layer,
+        dropout=dropout,
+    ).to(device)
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+    optimizer = torch.optim.AdamW(
+        model.parameters(), lr=learning_rate, weight_decay=weight_decay
+    )
     # 후반으로 갈수록 보폭을 좁혀 검증 손실이 급등하는 구간을 줄인다.
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
     print(f"장치: {device} | 클래스: {num_classes}개")
     print(f"학습 {len(train_indices)}개 · 검증 {len(val_indices)}개 클립")
+    print(
+        f"모델 hidden {hidden_dim} · layer {num_layer} · dropout {dropout} "
+        f"· wd {weight_decay} | 저장 기준 최근 {smoothing}에폭 평균"
+    )
 
     checkpoint_path = Path(checkpoint_path)
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     best_accuracy = 0.0
+    best_smoothed = 0.0
+    recent = deque(maxlen=smoothing)
 
     for epoch in range(1, epochs + 1):
         train_loss, train_accuracy = run_epoch(
@@ -150,14 +169,20 @@ def train(
         val_loss, val_accuracy = run_epoch(model, val_loader, criterion, device)
         scheduler.step()
 
+        # 검증 세트가 작아 단일 에폭 정확도는 크게 진동한다.
+        # 최근 몇 에폭의 평균이 최고일 때 저장해 우연한 고점을 걸러낸다.
+        recent.append(val_accuracy)
+        smoothed = sum(recent) / len(recent)
+
         print(
             f"[{epoch:3d}/{epochs}] "
             f"train loss {train_loss:.4f} acc {train_accuracy:.3f} | "
-            f"val loss {val_loss:.4f} acc {val_accuracy:.3f} | "
+            f"val loss {val_loss:.4f} acc {val_accuracy:.3f} avg {smoothed:.3f} | "
             f"lr {scheduler.get_last_lr()[0]:.2e}"
         )
 
-        if val_accuracy >= best_accuracy:
+        if smoothed >= best_smoothed:
+            best_smoothed = smoothed
             best_accuracy = val_accuracy
             torch.save(
                 {
@@ -165,11 +190,18 @@ def train(
                     "model_state": model.state_dict(),
                     "num_classes": num_classes,
                     "val_accuracy": val_accuracy,
+                    "smoothed_accuracy": smoothed,
+                    "hidden_dim": hidden_dim,
+                    "num_layer": num_layer,
+                    "dropout": dropout,
                 },
                 checkpoint_path,
             )
 
-    print(f"최고 검증 정확도 {best_accuracy:.3f} · 저장 위치 {checkpoint_path}")
+    print(
+        f"저장 모델 검증 정확도 {best_accuracy:.3f} "
+        f"(최근 {smoothing}에폭 평균 {best_smoothed:.3f}) · {checkpoint_path}"
+    )
     return best_accuracy
 
 
@@ -184,6 +216,13 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CHECKPOINT_PATH)
     parser.add_argument("--num-workers", type=int, default=0)
+    parser.add_argument("--hidden-dim", type=int, default=256)
+    parser.add_argument("--num-layer", type=int, default=2)
+    parser.add_argument("--dropout", type=float, default=0.2)
+    parser.add_argument("--weight-decay", type=float, default=0.01)
+    parser.add_argument(
+        "--smoothing", type=int, default=3, help="체크포인트 판정에 쓸 에폭 수"
+    )
     parser.add_argument(
         "--cpu", action="store_true", help="GPU가 있어도 CPU로 학습한다"
     )
@@ -203,6 +242,11 @@ def main():
         checkpoint_path=args.checkpoint,
         num_workers=args.num_workers,
         prefer_gpu=not args.cpu,
+        hidden_dim=args.hidden_dim,
+        num_layer=args.num_layer,
+        dropout=args.dropout,
+        weight_decay=args.weight_decay,
+        smoothing=args.smoothing,
     )
 
 
