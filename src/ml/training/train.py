@@ -94,7 +94,7 @@ def split_by_speaker(dataset, val_ratio=0.2, seed=42, val_speakers=None):
     return train_indices, val_indices, sorted(val_speakers)
 
 
-def run_epoch(model, loader, criterion, device, optimizer=None):
+def run_epoch(model, loader, criterion, device, optimizer=None, amp=False):
     """한 에폭을 실행하고 평균 손실과 정확도를 반환한다."""
     is_training = optimizer is not None
     model.train(is_training)
@@ -105,18 +105,20 @@ def run_epoch(model, loader, criterion, device, optimizer=None):
 
     with torch.set_grad_enabled(is_training):
         for frames, labels in loader:
-            frames = frames.to(device)
-            labels = labels.to(device)
+            frames = frames.to(device, non_blocking=True)
+            labels = labels.to(device, non_blocking=True)
 
-            logits = model(frames)
-            loss = criterion(logits, labels)
+            # bfloat16은 fp16과 달리 표현 범위가 넓어 GradScaler 없이 안전하다.
+            with torch.autocast("cuda", dtype=torch.bfloat16, enabled=amp):
+                logits = model(frames)
+                loss = criterion(logits, labels)
 
             if is_training:
-                optimizer.zero_grad()
+                optimizer.zero_grad(set_to_none=True)
                 loss.backward()
                 optimizer.step()
 
-            total_loss += loss.item() * labels.size(0)
+            total_loss += loss.float().item() * labels.size(0)
             total_correct += (logits.argmax(dim=1) == labels).sum().item()
             total_count += labels.size(0)
 
@@ -135,6 +137,7 @@ def train(
     checkpoint_path=DEFAULT_CHECKPOINT_PATH,
     num_workers=0,
     prefer_gpu=True,
+    amp=True,
     hidden_dim=256,
     num_layer=2,
     dropout=0.2,
@@ -149,6 +152,8 @@ def train(
 ):
     set_seed(seed)
     device = resolve_device(prefer_gpu)
+    # 혼합정밀도는 CUDA에서만 의미가 있다.
+    amp = amp and device.type == "cuda"
 
     config = {
         "epochs": epochs,
@@ -164,6 +169,7 @@ def train(
         "augment": augment,
         "pretrained": pretrained,
         "freeze_backbone": freeze_backbone,
+        "amp": amp,
     }
 
     # 증강은 학습 분할에만 적용한다. 검증은 원본이어야 성능을 정직하게 잰다.
@@ -187,16 +193,25 @@ def train(
     config["val_speakers"] = ",".join(held_out)
     tracker = start_tracking(wandb_project, run_name, config)
 
+    # worker를 에폭마다 새로 만들면 생성 비용이 반복된다. pin_memory는 GPU 전송을 앞당긴다.
+    loader_options = {
+        "num_workers": num_workers,
+        "pin_memory": device.type == "cuda",
+        "persistent_workers": num_workers > 0,
+    }
+    if num_workers > 0:
+        loader_options["prefetch_factor"] = 4
+
     train_loader = DataLoader(
         Subset(train_dataset, train_indices),
         batch_size=batch_size,
         shuffle=True,
-        num_workers=num_workers,
+        **loader_options,
     )
     val_loader = DataLoader(
         Subset(plain, val_indices),
         batch_size=batch_size,
-        num_workers=num_workers,
+        **loader_options,
     )
 
     model = LipReadingModel(
@@ -232,6 +247,7 @@ def train(
     )
     print(
         f"학습 파라미터 {trainable_count / 1e6:.2f}M / 전체 {total_count / 1e6:.2f}M "
+        f"| AMP {'켬' if amp else '끔'} · worker {num_workers} "
         f"| 저장 기준 최근 {smoothing}에폭 평균"
     )
 
@@ -243,9 +259,11 @@ def train(
 
     for epoch in range(1, epochs + 1):
         train_loss, train_accuracy = run_epoch(
-            model, train_loader, criterion, device, optimizer
+            model, train_loader, criterion, device, optimizer, amp=amp
         )
-        val_loss, val_accuracy = run_epoch(model, val_loader, criterion, device)
+        val_loss, val_accuracy = run_epoch(
+            model, val_loader, criterion, device, amp=amp
+        )
         scheduler.step()
 
         # 검증 세트가 작아 단일 에폭 정확도는 크게 진동한다.
@@ -320,6 +338,9 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CHECKPOINT_PATH)
     parser.add_argument("--num-workers", type=int, default=0)
+    parser.add_argument(
+        "--no-amp", action="store_true", help="혼합정밀도 없이 fp32로 학습한다"
+    )
     parser.add_argument("--hidden-dim", type=int, default=256)
     parser.add_argument("--num-layer", type=int, default=2)
     parser.add_argument("--dropout", type=float, default=0.2)
@@ -364,6 +385,7 @@ def main():
         checkpoint_path=args.checkpoint,
         num_workers=args.num_workers,
         prefer_gpu=not args.cpu,
+        amp=not args.no_amp,
         hidden_dim=args.hidden_dim,
         num_layer=args.num_layer,
         dropout=args.dropout,
