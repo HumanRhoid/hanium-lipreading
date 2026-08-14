@@ -7,6 +7,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from src.backend.auth.adapters.repository import SQLAlchemyAuthRepository
+from src.backend.auth.api import router as auth_router
+from src.backend.auth.service import AuthService
 from src.backend.core import Settings, SQLAlchemyDatabase
 from src.backend.health import router as health_router
 from src.backend.recognition.adapters.inference import (
@@ -27,11 +30,7 @@ from src.backend.recognition.ports import (
 )
 from src.backend.recognition.service import NoopTextCorrector, RecognitionService
 
-# Callable 타입 힌트 정의: close() 함수의 시그니처를 나타내며,
-# 반환값은 Awaitable[None]으로 비동기적으로 실행될 수 있는 함수임을 의미한다.
 CloseCallback = Callable[[], Awaitable[None]]
-
-# → 정리해야 할 close() 함수들을 리스트에 모아뒀다가, 종료 시 close 함수들을 한꺼번에 실행.
 
 
 async def _call_close(close: CloseCallback) -> None:
@@ -49,6 +48,7 @@ async def _collect_close_errors(
         *(_call_close(close) for close in close_callbacks),
         return_exceptions=True,
     )
+
     return tuple(result for result in results if isinstance(result, BaseException))
 
 
@@ -59,43 +59,62 @@ async def _cleanup_resources(
     """실행 자원을 먼저 drain하고 DB engine은 마지막에 닫는다."""
 
     errors = list(await _collect_close_errors(dependency_closes))
+
     if database_close is not None:
         errors.extend(await _collect_close_errors((database_close,)))
+
     return tuple(errors)
 
 
 async def _wait_for_cleanup(
     cleanup_task: asyncio.Task[tuple[BaseException, ...]],
-) -> tuple[tuple[BaseException, ...], asyncio.CancelledError | None]:
+) -> tuple[
+    tuple[BaseException, ...],
+    asyncio.CancelledError | None,
+]:
     """호출자 취소를 보존하면서 공유 정리 task가 끝날 때까지 보호한다."""
 
     cancellation: asyncio.CancelledError | None = None
+
     while True:
         try:
             return await asyncio.shield(cleanup_task), cancellation
+
         except asyncio.CancelledError as error:
-            # shield 대상이 아니라 현재 lifespan task가 취소된 경우에만 기록한다.
             if cleanup_task.done():
                 try:
                     return cleanup_task.result(), cancellation
                 except BaseException as cleanup_error:
                     return (cleanup_error,), cancellation
+
             if cancellation is None:
                 cancellation = error
+
         except BaseException as cleanup_error:
             return (cleanup_error,), cancellation
 
 
-def _raise_lifecycle_errors(errors: Sequence[BaseException]) -> None:
+def _raise_lifecycle_errors(
+    errors: Sequence[BaseException],
+) -> None:
     """단일 오류는 그대로, 복수 오류는 원인을 잃지 않는 그룹으로 전달한다."""
 
     if not errors:
         return
+
     if len(errors) == 1:
         raise errors[0]
+
     if all(isinstance(error, Exception) for error in errors):
-        raise ExceptionGroup("애플리케이션 수명주기 오류", list(errors))
-    raise BaseExceptionGroup("애플리케이션 수명주기 오류", list(errors))
+        raise ExceptionGroup(
+            "애플리케이션 수명주기 오류",
+            list(errors),
+        )
+
+    raise BaseExceptionGroup(
+        "애플리케이션 수명주기 오류",
+        list(errors),
+    )
 
 
 def create_gateway(settings: Settings):
@@ -106,10 +125,10 @@ def create_gateway(settings: Settings):
             FakeSyncPredictor(),
             max_concurrency=settings.max_inference_concurrency,
         )
+
     return UnavailableRecognitionGateway()
 
 
-# create_app에 port로 부터 프레임 조건 추가 및 타입 힌트 추가
 def create_app(
     *,
     settings: Settings | None = None,
@@ -117,43 +136,61 @@ def create_app(
     repository: RecognitionRepository | None = None,
     gateway: RecognitionGateway | None = None,
     frame_validator: FrameValidator | None = None,
+    auth_service: AuthService | None = None,
 ) -> FastAPI:
-    """운영 구현과
-    테스트 대역을 주입할 수 있는
-    애플리케이션을 생성한다.
-    """
+    """운영 구현과 테스트 대역을 주입할 수 있는 애플리케이션을 생성한다."""
+
     app_settings = settings or Settings()
-    # settings가 None이면 기본 Settings()를 사용
-    # 아니라면 주입된 settings를 사용
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:  # app이 켜지는 시점
+    async def lifespan(
+        app: FastAPI,
+    ) -> AsyncGenerator[None, None]:
+        """애플리케이션 실행 자원을 생성하고 종료 시 정리한다."""
+
         dependency_closes: list[CloseCallback] = []
         lifecycle_errors: list[BaseException] = []
         database_close: CloseCallback | None = None
+
         app.state.draining = True
+
         try:
-            # 데베 연결 (SQLAlchemyDatabase)과 repository는
-            # lifespan에서 생성하고,
-            # lifespan 종료 시점에 close()를 호출한다.
-            # 삼항연산자로 database와 repository가
-            # None이면 기본 구현을 생성하고,
-            # None이 아니면 주입된 구현을 사용한다.
+            # 실제 DB 또는 테스트에서 주입한 가짜 DB를 사용한다.
             app_database = (
                 database if database is not None else SQLAlchemyDatabase(app_settings)
             )
             database_close = app_database.close
 
+            # 립리딩 인식용 repository
             app_repository = (
                 repository
                 if repository is not None
                 else SQLAlchemyRecognitionRepository(app_database.session_factory)
             )
+
+            # 인증용 service
+            #
+            # 운영 환경의 SQLAlchemyDatabase에는 session_factory가 있으므로
+            # 실제 AuthRepository와 AuthService를 자동 생성한다.
+            #
+            # 기존 단위 테스트의 FakeDatabase에는 session_factory가 없으므로
+            # 인증 객체 생성을 건너뛰어 기존 테스트 대역과 호환되도록 한다.
+            app_auth_service = auth_service
+            app_auth_repository = None
+
+            if app_auth_service is None and hasattr(app_database, "session_factory"):
+                app_auth_repository = SQLAlchemyAuthRepository(
+                    app_database.session_factory
+                )
+                app_auth_service = AuthService(repository=app_auth_repository)
+
+            # 립리딩 추론 gateway
             app_gateway = (
                 gateway if gateway is not None else create_gateway(app_settings)
             )
             dependency_closes.append(app_gateway.close)
 
+            # 입력 프레임 검증기
             app_frame_validator = (
                 frame_validator
                 if frame_validator is not None
@@ -164,11 +201,11 @@ def create_app(
             )
             dependency_closes.append(app_frame_validator.close)
 
-            # lifespan(app이 켜지는 시점)에서 생성한 객체들을 app.state에 저장하여
-            # FastAPI의 의존성 주입 시스템에서 사용할 수 있도록 한다.
-            # 이 과정은 단 1번만 수행되며, lifespan 종료 시점에 close()를 호출하여 자원을 정리한다.
+            # 공통
             app.state.settings = app_settings
             app.state.database = app_database
+
+            # recognition
             app.state.repository = app_repository
             app.state.gateway = app_gateway
             app.state.frame_validator = app_frame_validator
@@ -179,51 +216,59 @@ def create_app(
                 max_active_sessions=app_settings.max_active_sessions,
             )
 
+            # auth
+            app.state.auth_repository = app_auth_repository
+            app.state.auth_service = app_auth_service
+
             await app_gateway.start()
+
             app.state.draining = False
 
             yield
 
         except BaseException as error:
             lifecycle_errors.append(error)
+
         finally:
             app.state.draining = True
 
         if dependency_closes or database_close is not None:
-            # validator와 gateway를 먼저 drain하고 세션 정리에 필요한 DB는 마지막에 닫는다.
             cleanup_task = asyncio.create_task(
                 _cleanup_resources(
                     tuple(reversed(dependency_closes)),
                     database_close,
                 )
             )
+
             close_errors, cancellation = await _wait_for_cleanup(cleanup_task)
+
             if cancellation is not None:
                 lifecycle_errors.append(cancellation)
+
             lifecycle_errors.extend(close_errors)
 
         _raise_lifecycle_errors(lifecycle_errors)
 
-    # FastAPI 인스턴스를 생성. 프레임워크가 내부적으로 실행할 수 있도록
-    # lifespan context manager를 등록(전달)한다.
     app = FastAPI(
         title="한이음 립리딩 API",
         version="0.1.0",
         lifespan=lifespan,
     )
-    # CORS 미들웨어를 추가하여 프론트엔드와의 통신을 허용
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=app_settings.allowed_origins,
         allow_credentials=False,
-        # allow_methods=["GET"], 수정
-        # preflight와 이미지 및 프레임 데이터를 고려하면
-        # POST, OPTIONS도 허용해야 한다
-        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_methods=[
+            "GET",
+            "POST",
+            "OPTIONS",
+        ],
         allow_headers=["*"],
     )
 
     app.include_router(health_router)
+    app.include_router(auth_router)
     app.include_router(recognition_router)
 
     return app
