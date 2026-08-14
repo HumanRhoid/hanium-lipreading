@@ -35,6 +35,21 @@ def set_seed(seed):
     torch.cuda.manual_seed_all(seed)
 
 
+def start_tracking(project, run_name, config):
+    """W&B 실험 추적을 시작한다. 미설치이거나 project가 없으면 None을 돌려준다."""
+    if project is None:
+        return None
+
+    try:
+        import wandb
+    except ImportError:
+        print("[알림] wandb가 없어 실험 추적을 건너뜁니다. pip install wandb")
+        return None
+
+    wandb.init(project=project, name=run_name, config=config)
+    return wandb
+
+
 def split_by_speaker(dataset, val_ratio=0.2, seed=42):
     """화자 단위로 학습·검증 인덱스를 나눈다.
 
@@ -113,19 +128,48 @@ def train(
     dropout=0.2,
     weight_decay=0.01,
     smoothing=3,
+    augment=True,
+    augmentation_config=None,
+    pretrained=False,
+    wandb_project=None,
+    run_name=None,
 ):
     set_seed(seed)
     device = resolve_device(prefer_gpu)
 
-    augmented = LipReadingDataset(
-        manifest_path, data_root, augmentation=VideoAugmentation(seed=seed)
+    config = {
+        "epochs": epochs,
+        "batch_size": batch_size,
+        "learning_rate": learning_rate,
+        "val_ratio": val_ratio,
+        "seed": seed,
+        "hidden_dim": hidden_dim,
+        "num_layer": num_layer,
+        "dropout": dropout,
+        "weight_decay": weight_decay,
+        "smoothing": smoothing,
+        "augment": augment,
+        "pretrained": pretrained,
+    }
+    tracker = start_tracking(wandb_project, run_name, config)
+
+    # 증강은 학습 분할에만 적용한다. 검증은 원본이어야 성능을 정직하게 잰다.
+    augmentation = (
+        VideoAugmentation(config=augmentation_config, seed=seed) if augment else None
     )
-    plain = LipReadingDataset(manifest_path, data_root)
+    # 사전학습 백본은 ImageNet 분포를 전제하므로 입력 정규화를 함께 맞춘다.
+    train_dataset = LipReadingDataset(
+        manifest_path,
+        data_root,
+        augmentation=augmentation,
+        imagenet_norm=pretrained,
+    )
+    plain = LipReadingDataset(manifest_path, data_root, imagenet_norm=pretrained)
     num_classes = len({row["label_id"] for row in plain.rows})
 
     train_indices, val_indices = split_by_speaker(plain, val_ratio, seed)
     train_loader = DataLoader(
-        Subset(augmented, train_indices),
+        Subset(train_dataset, train_indices),
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
@@ -141,6 +185,7 @@ def train(
         hidden_dim=hidden_dim,
         num_layer=num_layer,
         dropout=dropout,
+        pretrained=pretrained,
     ).to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(
@@ -153,7 +198,9 @@ def train(
     print(f"학습 {len(train_indices)}개 · 검증 {len(val_indices)}개 클립")
     print(
         f"모델 hidden {hidden_dim} · layer {num_layer} · dropout {dropout} "
-        f"· wd {weight_decay} | 저장 기준 최근 {smoothing}에폭 평균"
+        f"· wd {weight_decay} | 증강 {'켬' if augment else '끔'} "
+        f"· 사전학습 {'켬' if pretrained else '끔'} "
+        f"| 저장 기준 최근 {smoothing}에폭 평균"
     )
 
     checkpoint_path = Path(checkpoint_path)
@@ -181,6 +228,19 @@ def train(
             f"lr {scheduler.get_last_lr()[0]:.2e}"
         )
 
+        if tracker is not None:
+            tracker.log(
+                {
+                    "train/loss": train_loss,
+                    "train/acc": train_accuracy,
+                    "val/loss": val_loss,
+                    "val/acc": val_accuracy,
+                    "val/acc_smoothed": smoothed,
+                    "lr": scheduler.get_last_lr()[0],
+                },
+                step=epoch,
+            )
+
         if smoothed >= best_smoothed:
             best_smoothed = smoothed
             best_accuracy = val_accuracy
@@ -202,6 +262,12 @@ def train(
         f"저장 모델 검증 정확도 {best_accuracy:.3f} "
         f"(최근 {smoothing}에폭 평균 {best_smoothed:.3f}) · {checkpoint_path}"
     )
+
+    if tracker is not None:
+        tracker.summary["best_val_acc"] = best_accuracy
+        tracker.summary["best_val_acc_smoothed"] = best_smoothed
+        tracker.finish()
+
     return best_accuracy
 
 
@@ -223,6 +289,18 @@ def parse_args():
     parser.add_argument(
         "--smoothing", type=int, default=3, help="체크포인트 판정에 쓸 에폭 수"
     )
+    parser.add_argument(
+        "--no-augment", action="store_true", help="증강 없이 학습해 효과를 비교한다"
+    )
+    parser.add_argument(
+        "--pretrained",
+        action="store_true",
+        help="ImageNet 가중치로 백본을 초기화한다",
+    )
+    parser.add_argument(
+        "--wandb-project", default=None, help="지정하면 W&B로 실험을 기록한다"
+    )
+    parser.add_argument("--run-name", default=None, help="W&B 실행 이름")
     parser.add_argument(
         "--cpu", action="store_true", help="GPU가 있어도 CPU로 학습한다"
     )
@@ -247,6 +325,10 @@ def main():
         dropout=args.dropout,
         weight_decay=args.weight_decay,
         smoothing=args.smoothing,
+        augment=not args.no_augment,
+        pretrained=args.pretrained,
+        wandb_project=args.wandb_project,
+        run_name=args.run_name,
     )
 
 

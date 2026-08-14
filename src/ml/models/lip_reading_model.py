@@ -10,9 +10,16 @@ from .temporal import TemporalBiGRU
 class LipReadingModel(nn.Module):
     """백본·시간 모델·분류 헤드를 잇는 종단 간 립리딩 모델."""
 
-    def __init__(self, num_classes, hidden_dim=256, num_layer=2, dropout=0.2):
+    def __init__(
+        self,
+        num_classes,
+        hidden_dim=256,
+        num_layer=2,
+        dropout=0.2,
+        pretrained=False,
+    ):
         super().__init__()
-        self.backbone = LipReadingBackbone()
+        self.backbone = LipReadingBackbone(pretrained=pretrained)
         self.temporal = TemporalBiGRU(
             input_dim=self.backbone.feature_dim,
             hidden_dim=hidden_dim,
