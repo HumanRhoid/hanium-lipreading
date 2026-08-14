@@ -20,6 +20,9 @@ MANIFEST_PATH = PROJECT_ROOT / "data" / "manifest.csv"
 
 def parse_stem(stem):
     """s01_물주세요_01 → (speaker, phrase, take). 규칙 불일치 시 None."""
+    # Drive에 같은 이름을 다시 올리면 "s01_물주세요_01 (1)" 사본이 생긴다.
+    if "(" in stem:
+        return None
     parts = stem.split("_")
     if len(parts) != 3:
         return None
