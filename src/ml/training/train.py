@@ -94,7 +94,49 @@ def split_by_speaker(dataset, val_ratio=0.2, seed=42, val_speakers=None):
     return train_indices, val_indices, sorted(val_speakers)
 
 
-def run_epoch(model, loader, criterion, device, optimizer=None, amp=False):
+class WeightAverage:
+    """가중치의 지수이동평균을 유지한다.
+
+    후반 에폭에서 가중치가 진동해도 평균값은 완만하게 움직이므로
+    검증 성능이 안정된다. 학습에는 원본 가중치를 그대로 쓴다.
+    """
+
+    def __init__(self, model, decay=0.999):
+        self.decay = decay
+        self.shadow = {
+            name: param.detach().clone()
+            for name, param in model.state_dict().items()
+            if param.dtype.is_floating_point
+        }
+
+    @torch.no_grad()
+    def update(self, model):
+        for name, param in model.state_dict().items():
+            if name in self.shadow:
+                self.shadow[name].mul_(self.decay).add_(
+                    param.detach(), alpha=1 - self.decay
+                )
+
+    def apply_to(self, model):
+        """평균 가중치를 모델에 넣고, 원래 값을 돌려준다."""
+        backup = {name: model.state_dict()[name].clone() for name in self.shadow}
+        model.load_state_dict(self.shadow, strict=False)
+        return backup
+
+    def restore(self, model, backup):
+        model.load_state_dict(backup, strict=False)
+
+
+def run_epoch(
+    model,
+    loader,
+    criterion,
+    device,
+    optimizer=None,
+    amp=False,
+    grad_clip=None,
+    averager=None,
+):
     """한 에폭을 실행하고 평균 손실과 정확도를 반환한다."""
     is_training = optimizer is not None
     model.train(is_training)
@@ -116,7 +158,12 @@ def run_epoch(model, loader, criterion, device, optimizer=None, amp=False):
             if is_training:
                 optimizer.zero_grad(set_to_none=True)
                 loss.backward()
+                # 드물게 튀는 그래디언트가 가중치를 크게 흔드는 것을 막는다.
+                if grad_clip:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
                 optimizer.step()
+                if averager is not None:
+                    averager.update(model)
 
             total_loss += loss.float().item() * labels.size(0)
             total_correct += (logits.argmax(dim=1) == labels).sum().item()
@@ -143,6 +190,9 @@ def train(
     dropout=0.2,
     weight_decay=0.01,
     smoothing=3,
+    label_smoothing=0.1,
+    grad_clip=1.0,
+    ema_decay=0.999,
     augment=True,
     augmentation_config=None,
     pretrained=False,
@@ -166,6 +216,9 @@ def train(
         "dropout": dropout,
         "weight_decay": weight_decay,
         "smoothing": smoothing,
+        "label_smoothing": label_smoothing,
+        "grad_clip": grad_clip,
+        "ema_decay": ema_decay,
         "augment": augment,
         "pretrained": pretrained,
         "freeze_backbone": freeze_backbone,
@@ -222,7 +275,8 @@ def train(
         pretrained=pretrained,
         freeze_backbone=freeze_backbone,
     ).to(device)
-    criterion = nn.CrossEntropyLoss()
+    # label smoothing은 정답에 100% 확신하지 못하게 해 과신을 줄인다.
+    criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
     # 동결된 파라미터는 옵티마이저에 넣지 않는다.
     trainable = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(
@@ -230,6 +284,7 @@ def train(
     )
     # 후반으로 갈수록 보폭을 좁혀 검증 손실이 급등하는 구간을 줄인다.
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+    averager = WeightAverage(model, decay=ema_decay) if ema_decay else None
 
     trainable_count = sum(p.numel() for p in trainable)
     total_count = sum(p.numel() for p in model.parameters())
@@ -247,8 +302,11 @@ def train(
     )
     print(
         f"학습 파라미터 {trainable_count / 1e6:.2f}M / 전체 {total_count / 1e6:.2f}M "
-        f"| AMP {'켬' if amp else '끔'} · worker {num_workers} "
-        f"| 저장 기준 최근 {smoothing}에폭 평균"
+        f"| AMP {'켬' if amp else '끔'} · worker {num_workers}"
+    )
+    print(
+        f"label smoothing {label_smoothing} · grad clip {grad_clip} "
+        f"· EMA {ema_decay or '끔'} | 저장 기준 최근 {smoothing}에폭 평균"
     )
 
     checkpoint_path = Path(checkpoint_path)
@@ -259,11 +317,24 @@ def train(
 
     for epoch in range(1, epochs + 1):
         train_loss, train_accuracy = run_epoch(
-            model, train_loader, criterion, device, optimizer, amp=amp
+            model,
+            train_loader,
+            criterion,
+            device,
+            optimizer,
+            amp=amp,
+            grad_clip=grad_clip,
+            averager=averager,
         )
+
+        # 평균 가중치로 검증한 뒤 학습용 가중치를 되돌린다.
+        backup = averager.apply_to(model) if averager is not None else None
         val_loss, val_accuracy = run_epoch(
             model, val_loader, criterion, device, amp=amp
         )
+        if averager is not None:
+            averager.restore(model, backup)
+
         scheduler.step()
 
         # 검증 세트가 작아 단일 에폭 정확도는 크게 진동한다.
@@ -294,6 +365,8 @@ def train(
         if smoothed >= best_smoothed:
             best_smoothed = smoothed
             best_accuracy = val_accuracy
+            # 검증에 쓴 것과 같은 가중치를 저장해야 재현된다.
+            saved = averager.apply_to(model) if averager is not None else None
             torch.save(
                 {
                     "epoch": epoch,
@@ -307,6 +380,8 @@ def train(
                 },
                 checkpoint_path,
             )
+            if averager is not None:
+                averager.restore(model, saved)
 
     print(
         f"저장 모델 검증 정확도 {best_accuracy:.3f} "
@@ -347,6 +422,13 @@ def parse_args():
     parser.add_argument("--weight-decay", type=float, default=0.01)
     parser.add_argument(
         "--smoothing", type=int, default=3, help="체크포인트 판정에 쓸 에폭 수"
+    )
+    parser.add_argument("--label-smoothing", type=float, default=0.1)
+    parser.add_argument(
+        "--grad-clip", type=float, default=1.0, help="0이면 클리핑하지 않는다"
+    )
+    parser.add_argument(
+        "--ema-decay", type=float, default=0.999, help="0이면 가중치 평균을 쓰지 않는다"
     )
     parser.add_argument(
         "--no-augment", action="store_true", help="증강 없이 학습해 효과를 비교한다"
@@ -391,6 +473,9 @@ def main():
         dropout=args.dropout,
         weight_decay=args.weight_decay,
         smoothing=args.smoothing,
+        label_smoothing=args.label_smoothing,
+        grad_clip=args.grad_clip,
+        ema_decay=args.ema_decay,
         augment=not args.no_augment,
         pretrained=args.pretrained,
         freeze_backbone=args.freeze_backbone,
