@@ -1,0 +1,66 @@
+[
+ {
+  "speaker": "s01",
+  "seed": 42,
+  "best": 0.713,
+  "last": null,
+  "source": "docs/experiments/2026-08-20 §2 · 60프레임 80에폭 seed42",
+  "note": "러너 이전 기록이라 마지막 에폭 값이 없다"
+ },
+ {
+  "speaker": "s03",
+  "seed": 42,
+  "best": 0.554,
+  "last": null,
+  "source": "docs/experiments/2026-08-20 §2 · 60프레임 80에폭 seed42",
+  "note": "러너 이전 기록이라 마지막 에폭 값이 없다"
+ },
+ {
+  "speaker": "s04",
+  "seed": 42,
+  "best": 0.76,
+  "last": null,
+  "source": "docs/experiments/2026-08-20 §2 · 60프레임 80에폭 seed42",
+  "note": "러너 이전 기록이라 마지막 에폭 값이 없다"
+ },
+ {
+  "speaker": "s05",
+  "seed": 42,
+  "best": 0.193,
+  "last": null,
+  "source": "docs/experiments/2026-08-20 §2 · 60프레임 80에폭 seed42",
+  "note": "러너 이전 기록이라 마지막 에폭 값이 없다"
+ },
+ {
+  "speaker": "s06",
+  "seed": 42,
+  "best": 0.739,
+  "last": null,
+  "source": "docs/experiments/2026-08-20 §2 · 60프레임 80에폭 seed42",
+  "note": "러너 이전 기록이라 마지막 에폭 값이 없다"
+ },
+ {
+  "speaker": "s07",
+  "seed": 42,
+  "best": 0.363,
+  "last": null,
+  "source": "docs/experiments/2026-08-20 §2 · 60프레임 80에폭 seed42",
+  "note": "러너 이전 기록이라 마지막 에폭 값이 없다"
+ },
+ {
+  "speaker": "s08",
+  "seed": 42,
+  "best": 0.715,
+  "last": null,
+  "source": "docs/experiments/2026-08-20 §2 · 60프레임 80에폭 seed42",
+  "note": "러너 이전 기록이라 마지막 에폭 값이 없다"
+ },
+ {
+  "speaker": "s09",
+  "seed": 42,
+  "best": 0.407,
+  "last": null,
+  "source": "docs/experiments/2026-08-20 §2 · 60프레임 80에폭 seed42",
+  "note": "러너 이전 기록이라 마지막 에폭 값이 없다"
+ }
+]
