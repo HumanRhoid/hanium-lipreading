@@ -172,6 +172,30 @@ def run_epoch(
     return total_loss / total_count, total_correct / total_count
 
 
+def collect_errors(model, loader, device, amp=False):
+    """마지막 에폭 모델의 오답을 (정답, 예측) 쌍으로 센다.
+
+    어느 문구끼리 헷갈리는지가 다음 개입을 정한다. 2026-08-19에 손으로 뽑아
+    s07의 물주세요-토할거같아요 쌍을 찾은 작업을 자동화한 것이다.
+    보고값과 맞추기 위해 저장 시점이 아니라 마지막 에폭 가중치를 쓴다.
+    """
+    model.eval()
+    counts = {}
+    total = 0
+    with torch.no_grad():
+        for frames, labels in loader:
+            frames = frames.to(device, non_blocking=True)
+            labels = labels.to(device, non_blocking=True)
+            with torch.autocast("cuda", dtype=torch.bfloat16, enabled=amp):
+                predicted = model(frames).argmax(dim=1)
+            for true_id, pred_id in zip(labels.tolist(), predicted.tolist()):
+                total += 1
+                if true_id != pred_id:
+                    key = (true_id, pred_id)
+                    counts[key] = counts.get(key, 0) + 1
+    return [[t, p, n] for (t, p), n in sorted(counts.items())], total
+
+
 def train(
     manifest_path=DEFAULT_MANIFEST_PATH,
     data_root=DEFAULT_DATA_ROOT,
@@ -313,6 +337,13 @@ def train(
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     best_accuracy = 0.0
     best_smoothed = 0.0
+    best_epoch = 0
+    # 저장값과 별개로, 학습 중 한 번이라도 닿은 최고점을 따로 남긴다.
+    # 아무도 고를 수 없는 값이지만 상한이 어디인지 알려준다.
+    peak_accuracy = 0.0
+    peak_epoch = 0
+    # 학습 데이터를 다 맞히는 시점. 이후는 개선 신호 없이 도는 구간이다.
+    saturation_epoch = 0
     recent = deque(maxlen=smoothing)
 
     for epoch in range(1, epochs + 1):
@@ -342,6 +373,12 @@ def train(
         recent.append(val_accuracy)
         smoothed = sum(recent) / len(recent)
 
+        if val_accuracy > peak_accuracy:
+            peak_accuracy = val_accuracy
+            peak_epoch = epoch
+        if not saturation_epoch and train_accuracy >= 0.999:
+            saturation_epoch = epoch
+
         print(
             f"[{epoch:3d}/{epochs}] "
             f"train loss {train_loss:.4f} acc {train_accuracy:.3f} | "
@@ -365,6 +402,7 @@ def train(
         if smoothed >= best_smoothed:
             best_smoothed = smoothed
             best_accuracy = val_accuracy
+            best_epoch = epoch
             # 검증에 쓴 것과 같은 가중치를 저장해야 재현된다.
             saved = averager.apply_to(model) if averager is not None else None
             torch.save(
@@ -383,17 +421,43 @@ def train(
             if averager is not None:
                 averager.restore(model, saved)
 
+    errors, val_total = collect_errors(model, val_loader, device, amp)
+
+    # 저장값은 검증 화자를 보고 고른 값이라 낙관 편향이 있다.
+    # 마지막 에폭 값이 실사용에 가까우므로 둘 다 남긴다.
     print(
         f"저장 모델 검증 정확도 {best_accuracy:.3f} "
-        f"(최근 {smoothing}에폭 평균 {best_smoothed:.3f}) · {checkpoint_path}"
+        f"(최근 {smoothing}에폭 평균 {best_smoothed:.3f}) · "
+        f"{best_epoch}/{epochs}에폭 · {checkpoint_path}"
+    )
+    print(
+        f"최고점 {peak_accuracy:.3f} ({peak_epoch}에폭) · "
+        f"마지막 에폭 {val_accuracy:.3f} (보고용) · "
+        f"학습 포화 {saturation_epoch or '-'}에폭"
     )
 
     if tracker is not None:
         tracker.summary["best_val_acc"] = best_accuracy
         tracker.summary["best_val_acc_smoothed"] = best_smoothed
+        tracker.summary["best_epoch"] = best_epoch
+        tracker.summary["peak_val_acc"] = peak_accuracy
+        tracker.summary["peak_epoch"] = peak_epoch
+        tracker.summary["saturation_epoch"] = saturation_epoch
         tracker.finish()
 
-    return best_accuracy
+    return {
+        "best": best_accuracy,
+        "best_smoothed": best_smoothed,
+        "best_epoch": best_epoch,
+        "peak": peak_accuracy,
+        "peak_epoch": peak_epoch,
+        "saturation_epoch": saturation_epoch,
+        "errors": errors,
+        "val_size": val_total,
+        "last": val_accuracy,
+        "trainable_params": trainable_count,
+        "config": config,
+    }
 
 
 def parse_args():
