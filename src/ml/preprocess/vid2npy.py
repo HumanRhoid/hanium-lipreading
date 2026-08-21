@@ -1,9 +1,10 @@
+import argparse
 from pathlib import Path
 
 import numpy as np
 
 from src.ml.preprocess.lip_crop import create_landmarker, crop_lip_frames
-from src.ml.preprocess.normalize import normalize_frames
+from src.ml.preprocess.normalize import FIXED_FRAME_COUNT, normalize_frames
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -13,14 +14,14 @@ RAW_DIR = PROJECT_ROOT / "data" / "raw"
 PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
 
 
-def process_video(video_path, landmarker):
+def process_video(video_path, landmarker, frames=FIXED_FRAME_COUNT):
     lips, opennesses = crop_lip_frames(video_path, landmarker)
     if not lips:
         return None
-    return normalize_frames(lips, opennesses)
+    return normalize_frames(lips, opennesses, fixed_frame_count=frames)
 
 
-def run_batch(raw_dir=RAW_DIR, processed_dir=PROCESSED_DIR):
+def run_batch(raw_dir=RAW_DIR, processed_dir=PROCESSED_DIR, frames=FIXED_FRAME_COUNT):
     raw_dir = Path(raw_dir)
     processed_dir = Path(processed_dir)
     processed_dir.mkdir(parents=True, exist_ok=True)
@@ -41,7 +42,7 @@ def run_batch(raw_dir=RAW_DIR, processed_dir=PROCESSED_DIR):
                 continue
 
             print(f"처리 중: {video_path}")
-            npy_data = process_video(video_path, landmarker)
+            npy_data = process_video(video_path, landmarker, frames)
             if npy_data is None:
                 print(f"  입 검출 실패, 건너뜀: {video_path}")
                 failed += 1
@@ -58,5 +59,16 @@ def run_batch(raw_dir=RAW_DIR, processed_dir=PROCESSED_DIR):
     )
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="영상을 학습용 .npy로 전처리한다.")
+    parser.add_argument("--raw-dir", type=Path, default=RAW_DIR)
+    parser.add_argument("--processed-dir", type=Path, default=PROCESSED_DIR)
+    # 기존 데이터가 60프레임이므로 섞어 쓰려면 같은 값이어야 한다.
+    parser.add_argument("--frames", type=int, default=FIXED_FRAME_COUNT)
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    run_batch()
+    args = parse_args()
+    print(f"프레임 {args.frames}개로 전처리한다")
+    run_batch(args.raw_dir, args.processed_dir, args.frames)

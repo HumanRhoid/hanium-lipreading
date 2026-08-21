@@ -4,7 +4,10 @@ import numpy as np
 # 모델 학습용 고정 해상도 설정
 TARGET_WIDTH = 112
 TARGET_HEIGHT = 80
-FIXED_FRAME_COUNT = 30  # 프레임 수 맞추기 기준값
+# 2026-08-19b에 60으로 올렸다. 8화자 3시드에서 +0.033(t 1.34)으로
+# 판정선 0.042는 못 넘었지만 세 번의 독립 측정이 모두 양수였다.
+# 무엇보다 지금 데이터 1,234개가 전부 60프레임이라 30으로 뽑으면 섞을 수 없다.
+FIXED_FRAME_COUNT = 60
 
 # CLAHE (조명 불균일 보정) 설정
 CLAHE_CLIP_LIMIT = 2.0
