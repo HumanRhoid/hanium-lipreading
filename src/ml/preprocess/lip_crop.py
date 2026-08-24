@@ -1,9 +1,12 @@
+import math
 from pathlib import Path
 
 import cv2
 import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
+
+from src.ml.preprocess.normalize import TARGET_HEIGHT, TARGET_WIDTH
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_MODEL_PATH = PROJECT_ROOT / "models" / "face_landmarker.task"
@@ -53,8 +56,41 @@ def lip_openness(landmarks, w, h):
     return vertical / width
 
 
-def crop_lip(frame, landmarker, margin=0.5):
-    """입 ROI 크롭과 openness를 함께 반환. 얼굴 미검출 시 None."""
+# 입 너비가 출력 가로의 이 비율이 되도록 맞춘다. 0.5는 예전 축 정렬 크롭
+# (상자 + 좌우 50% 여백 = 상자의 2배)과 같은 배율이라 확대되는 화자가 없다.
+MOUTH_WIDTH_RATIO = 0.5
+
+
+def alignment_matrix(landmarks, w, h, out_w, out_h, mouth_ratio=MOUTH_WIDTH_RATIO):
+    """입꼬리 두 점으로 회전·크기·위치를 맞추는 2x3 닮음 변환을 만든다.
+
+    축 정렬 사각형에는 문제가 둘 있었다. 고개가 기울면 입이 대각선으로 들어가고,
+    상자 종횡비가 화자마다 달라 가로와 세로가 서로 다른 배율로 눌렸다.
+    닮음 변환은 회전을 펴고 한 배율만 쓰므로 둘 다 사라진다.
+    """
+    left, right = landmarks[LEFT_CORNER], landmarks[RIGHT_CORNER]
+    dx = (right.x - left.x) * w
+    dy = (right.y - left.y) * h
+    mouth_width = math.hypot(dx, dy)
+    if mouth_width < 1e-6:
+        return None
+
+    # 입꼬리를 잇는 선을 수평으로 돌린다.
+    angle = math.degrees(math.atan2(dy, dx))
+    scale = (out_w * mouth_ratio) / mouth_width
+
+    # 21점의 무게중심을 중심으로 쓴다. 최소·최대는 극단 한 점에 흔들린다.
+    cx = sum(landmarks[i].x for i in LIP_LANDMARKS) / len(LIP_LANDMARKS) * w
+    cy = sum(landmarks[i].y for i in LIP_LANDMARKS) / len(LIP_LANDMARKS) * h
+
+    matrix = cv2.getRotationMatrix2D((cx, cy), angle, scale)
+    matrix[0, 2] += out_w / 2 - cx
+    matrix[1, 2] += out_h / 2 - cy
+    return matrix
+
+
+def crop_lip(frame, landmarker, out_w=TARGET_WIDTH, out_h=TARGET_HEIGHT):
+    """정렬된 입 ROI 크롭과 openness를 함께 반환. 얼굴 미검출 시 None."""
     h, w = frame.shape[:2]
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
@@ -62,19 +98,20 @@ def crop_lip(frame, landmarker, margin=0.5):
     if not result.face_landmarks:
         return None
     landmarks = result.face_landmarks[0]
-    xs = [landmarks[i].x * w for i in LIP_LANDMARKS]
-    ys = [landmarks[i].y * h for i in LIP_LANDMARKS]
-    x_min, x_max = int(min(xs)), int(max(xs))
-    y_min, y_max = int(min(ys)), int(max(ys))
-    mw = int((x_max - x_min) * margin)
-    mh = int((y_max - y_min) * margin)
-    x_min, x_max = max(0, x_min - mw), min(w, x_max + mw)
-    y_min, y_max = max(0, y_min - mh), min(h, y_max + mh)
-    return frame[y_min:y_max, x_min:x_max], lip_openness(landmarks, w, h)
+
+    matrix = alignment_matrix(landmarks, w, h, out_w, out_h)
+    if matrix is None:
+        return None
+    # 입이 화면 가장자리에 붙어도 검은 띠를 만들지 않는다. CLAHE가 그 경계를
+    # 대비로 증폭하므로 없던 특징이 생긴다.
+    lip = cv2.warpAffine(
+        frame, matrix, (out_w, out_h), borderMode=cv2.BORDER_REPLICATE
+    )
+    return lip, lip_openness(landmarks, w, h)
 
 
-def crop_lip_frames(video_path, landmarker, margin=0.5):
-    """영상의 각 프레임에서 입 ROI 크롭 + openness를 리스트로 반환 (중간 영상 파일 없음).
+def crop_lip_frames(video_path, landmarker, out_w=TARGET_WIDTH, out_h=TARGET_HEIGHT):
+    """영상의 각 프레임에서 정렬된 입 ROI + openness를 리스트로 반환.
 
     반환: (lips, opennesses) — 프레임별 입 크롭 이미지와 벌어짐 비율.
     """
@@ -88,7 +125,7 @@ def crop_lip_frames(video_path, landmarker, margin=0.5):
             ret, frame = cap.read()
             if not ret:
                 break
-            result = crop_lip(frame, landmarker, margin=margin)
+            result = crop_lip(frame, landmarker, out_w, out_h)
             if result is not None:
                 lip, openness = result
                 lips.append(lip)
