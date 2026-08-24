@@ -5,12 +5,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
-
-from src.ml.preprocess.normalize import (
-    FIXED_FRAME_COUNT,
-    TARGET_HEIGHT,
-    TARGET_WIDTH,
-)
 import pytest
 
 from src.backend.recognition.domain import (
@@ -24,6 +18,11 @@ from src.backend.recognition.inference_worker import (
 from src.backend.recognition.ports import (
     InferenceJobDelivery,
     InferenceJobRecord,
+)
+from src.ml.preprocess.normalize import (
+    FIXED_FRAME_COUNT,
+    TARGET_HEIGHT,
+    TARGET_WIDTH,
 )
 
 JOB_ID = "11111111-2222-4333-8444-555555555555"
@@ -279,6 +278,31 @@ class FakeGateway:
         pass
 
 
+class FakeResultRepository:
+    def __init__(self, *, error: Exception | None = None) -> None:
+        self.error = error
+        self.saved: list[dict[str, object]] = []
+
+    async def save_inference_result(
+        self,
+        *,
+        utterance_id: int,
+        prediction: Prediction,
+        model_version: str | None,
+    ):
+        if self.error is not None:
+            raise self.error
+
+        self.saved.append(
+            {
+                "utterance_id": utterance_id,
+                "prediction": prediction,
+                "model_version": model_version,
+            }
+        )
+
+
+
 class FakeClock:
     def __init__(self) -> None:
         self.values = iter((PROCESSING_AT, TERMINAL_AT))
@@ -439,6 +463,7 @@ async def test_process_once_returns_false_when_queue_is_empty():
         object_storage=storage,
         preprocessor=preprocessor,
         gateway=gateway,
+        repository=FakeResultRepository(),
         consumer_name="worker-1",
         block_ms=100,
     )
@@ -458,12 +483,14 @@ async def test_process_once_preprocesses_video_calls_existing_gateway_and_acks()
         frames=(b"jpeg-1", b"jpeg-2"),
     )
     gateway = FakeGateway()
+    repository = FakeResultRepository()
 
     worker = InferenceWorker(
         queue=queue,
         object_storage=storage,
         preprocessor=preprocessor,
         gateway=gateway,
+        repository=repository,
         consumer_name="worker-1",
         block_ms=100,
         clock=FakeClock(),
@@ -483,6 +510,17 @@ async def test_process_once_preprocesses_video_calls_existing_gateway_and_acks()
         {
             "frames": (b"jpeg-1", b"jpeg-2"),
             "mode": RecognitionMode.CLOSED,
+        }
+    ]
+    assert repository.saved == [
+        {
+            "utterance_id": 123,
+            "prediction": Prediction(
+                text="테스트",
+                confidence=0.9,
+                phrase_code="TEST",
+            ),
+            "model_version": None,
         }
     ]
 
@@ -505,6 +543,7 @@ async def test_storage_failure_marks_failed_without_preprocess_or_inference():
         object_storage=storage,
         preprocessor=preprocessor,
         gateway=gateway,
+        repository=FakeResultRepository(),
         consumer_name="worker-1",
         block_ms=100,
         clock=FakeClock(),
@@ -538,6 +577,7 @@ async def test_preprocess_failure_marks_failed_without_inference():
         object_storage=storage,
         preprocessor=preprocessor,
         gateway=gateway,
+        repository=FakeResultRepository(),
         consumer_name="worker-1",
         block_ms=100,
         clock=FakeClock(),
@@ -570,6 +610,7 @@ async def test_inference_gateway_failure_marks_failed_and_acks():
         object_storage=storage,
         preprocessor=preprocessor,
         gateway=gateway,
+        repository=FakeResultRepository(),
         consumer_name="worker-1",
         block_ms=100,
         clock=FakeClock(),
@@ -590,6 +631,36 @@ async def test_inference_gateway_failure_marks_failed_and_acks():
     assert failed_payload["error_code"] == "INFERENCE_FAILED"
 
 
+async def test_result_persistence_failure_marks_failed_and_acks():
+    queue = FakeQueue(delivery=make_delivery())
+    repository = FakeResultRepository(error=RuntimeError("database unavailable"))
+
+    worker = InferenceWorker(
+        queue=queue,
+        object_storage=FakeObjectStorage(),
+        preprocessor=FakePreprocessor(),
+        gateway=FakeGateway(),
+        repository=repository,
+        consumer_name="worker-1",
+        block_ms=100,
+        clock=FakeClock(),
+    )
+
+    processed = await worker.process_once()
+
+    assert processed is True
+    assert repository.saved == []
+    assert [name for name, _payload in queue.calls] == [
+        "read_next",
+        "mark_processing",
+        "mark_failed",
+        "acknowledge",
+    ]
+
+    failed_payload = queue.calls[2][1]
+    assert failed_payload["error_code"] == "RESULT_PERSISTENCE_FAILED"
+
+
 async def test_cancellation_during_gateway_call_does_not_mark_failed_or_ack():
     queue = FakeQueue(delivery=make_delivery())
     storage = FakeObjectStorage()
@@ -601,6 +672,7 @@ async def test_cancellation_during_gateway_call_does_not_mark_failed_or_ack():
         object_storage=storage,
         preprocessor=preprocessor,
         gateway=gateway,
+        repository=FakeResultRepository(),
         consumer_name="worker-1",
         block_ms=100,
         clock=FakeClock(),
@@ -629,6 +701,7 @@ async def test_terminal_status_failure_does_not_ack():
         object_storage=storage,
         preprocessor=preprocessor,
         gateway=gateway,
+        repository=FakeResultRepository(),
         consumer_name="worker-1",
         block_ms=100,
         clock=FakeClock(),
@@ -654,6 +727,7 @@ async def test_run_forever_ensures_consumer_group_before_reading():
         object_storage=FakeObjectStorage(),
         preprocessor=FakePreprocessor(),
         gateway=FakeGateway(),
+        repository=FakeResultRepository(),
         consumer_name="worker-1",
         block_ms=100,
     )
@@ -694,6 +768,7 @@ def test_constructor_rejects_invalid_worker_settings(
             object_storage=FakeObjectStorage(),
             preprocessor=FakePreprocessor(),
             gateway=FakeGateway(),
+            repository=FakeResultRepository(),
             consumer_name=consumer_name,
             block_ms=block_ms,
         )
