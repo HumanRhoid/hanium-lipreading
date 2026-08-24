@@ -65,10 +65,14 @@ def check_config(records, config):
     previous = records[0].get("config")
     if previous is None:
         return
+    # seed와 val_speakers는 한 실험 안에서 런마다 달라지는 것이 정상이다.
+    # 교차검증은 화자를 하나씩 바꿔가며 도는데 그것을 오염으로 판정하면
+    # 두 번째 화자에서 항상 멈춘다.
+    varies = {"seed", "val_speakers"}
     changed = {
         key: (previous.get(key), value)
         for key, value in config.items()
-        if key != "seed" and previous.get(key) != value
+        if key not in varies and previous.get(key) != value
     }
     if changed:
         lines = [f"  {k}: {old} → {new}" for k, (old, new) in changed.items()]
