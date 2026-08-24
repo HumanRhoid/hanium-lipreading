@@ -59,13 +59,16 @@ class BasicBlock(nn.Module):
 
 class LipReadingBackbone(nn.Module):
     """입술 프레임마다 512차원 특징을 추출한다.
-    입력 shape은 ``[배치, 3, 시간, 80, 112]``이고 출력 shape은
+    입력 shape은 ``[배치, 3, 시간, 96, 192]``이고 출력 shape은
     ``[배치, 시간, 512]``이다. 시간축 길이는 축소하지 않는다.
     """
 
     input_channels = 3
-    input_height = 80
-    input_width = 112
+    # 구조 자체는 크기에 무관하다(마지막이 AdaptiveAvgPool). 이 값은 전처리
+    # 출력과 어긋난 데이터가 섞이는 것을 막는 검사용이므로 normalize.py의
+    # TARGET_HEIGHT · TARGET_WIDTH와 함께 바꿔야 한다.
+    input_height = 96
+    input_width = 192
     feature_dim = 512
 
     def __init__(self, pretrained=False):
@@ -175,7 +178,9 @@ class LipReadingBackbone(nn.Module):
             raise ValueError(f"expected 3 input channels, but received {channels}")
         if (height, width) != (self.input_height, self.input_width):
             raise ValueError(
-                f"expected spatial size (80, 112), but received ({height}, {width})"
+                f"expected spatial size "
+                f"({self.input_height}, {self.input_width}), "
+                f"but received ({height}, {width})"
             )
         if batch_size < 1 or frame_count < 1:
             raise ValueError("batch and time dimensions must be positive")
