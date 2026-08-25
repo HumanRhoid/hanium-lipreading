@@ -18,7 +18,7 @@ def backbone():
 
 def test_backbone_returns_one_feature_vector_per_frame(backbone):
     backbone.eval()
-    frames = torch.randn(2, 3, 3, 80, 112)
+    frames = torch.randn(2, 3, 3, 96, 192)
 
     with torch.inference_mode():
         features = backbone(frames)
@@ -49,7 +49,7 @@ def test_backbone_matches_agreed_3d_stem_and_resnet18_depth(backbone):
 @pytest.mark.parametrize("frame_count", [1, 5])
 def test_backbone_preserves_variable_frame_count(backbone, frame_count):
     backbone.eval()
-    frames = torch.randn(1, 3, frame_count, 80, 112)
+    frames = torch.randn(1, 3, frame_count, 96, 192)
 
     with torch.inference_mode():
         features = backbone(frames)
@@ -59,7 +59,7 @@ def test_backbone_preserves_variable_frame_count(backbone, frame_count):
 
 def test_backbone_propagates_gradients_through_3d_stem_and_resnet(backbone):
     backbone.train()
-    frames = torch.randn(1, 3, 2, 80, 112, requires_grad=True)
+    frames = torch.randn(1, 3, 2, 96, 192, requires_grad=True)
 
     features = backbone(frames)
     features.mean().backward()
@@ -90,7 +90,7 @@ def test_backbone_rejects_wrong_channel_count(backbone):
         backbone(frames)
 
 
-@pytest.mark.parametrize("height,width", [(64, 112), (80, 96)])
+@pytest.mark.parametrize("height,width", [(64, 192), (96, 160)])
 def test_backbone_rejects_wrong_spatial_size(backbone, height, width):
     frames = torch.randn(1, 3, 3, height, width)
 
@@ -101,8 +101,8 @@ def test_backbone_rejects_wrong_spatial_size(backbone, height, width):
 @pytest.mark.parametrize(
     "frames",
     [
-        torch.empty(0, 3, 3, 80, 112),
-        torch.empty(1, 3, 0, 80, 112),
+        torch.empty(0, 3, 3, 96, 192),
+        torch.empty(1, 3, 0, 96, 192),
     ],
 )
 def test_backbone_rejects_empty_batch_or_time(backbone, frames):
@@ -111,7 +111,7 @@ def test_backbone_rejects_empty_batch_or_time(backbone, frames):
 
 
 def test_backbone_rejects_integer_pixels(backbone):
-    frames = torch.zeros(1, 3, 3, 80, 112, dtype=torch.uint8)
+    frames = torch.zeros(1, 3, 3, 96, 192, dtype=torch.uint8)
 
     with pytest.raises(TypeError, match="floating-point dtype"):
         backbone(frames)
