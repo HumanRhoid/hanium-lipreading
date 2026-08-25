@@ -2,7 +2,7 @@
 
 from src.backend.recognition.ports import (
     InferenceJobQueue,
-    InferenceJobRecord,
+    InferenceJobStatusView,
     VideoUploadRepository,
 )
 
@@ -24,7 +24,7 @@ class InferenceJobStatusService:
         *,
         user_id: int,
         job_id: str,
-    ) -> InferenceJobRecord | None:
+    ) -> InferenceJobStatusView | None:
         """현재 사용자가 소유한 추론 Job만 반환한다."""
 
         if user_id <= 0:
@@ -47,4 +47,14 @@ class InferenceJobStatusService:
         if asset.user_id != user_id:
             return None
 
-        return job
+        result = None
+
+        if job.status == "SUCCEEDED":
+            result = await self._repository.get_inference_result(
+                utterance_id=job.utterance_id,
+            )
+
+        return InferenceJobStatusView(
+            job=job,
+            result=result,
+        )
