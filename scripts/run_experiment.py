@@ -174,31 +174,47 @@ def summarize(records, baseline_records=None, names=None):
     if baseline_records is None:
         return
 
-    base = {}
+    base_best, base_last = {}, {}
     for r in baseline_records:
-        base.setdefault(r["speaker"], []).append(r["best"])
-    shared = sorted(set(best_means) & set(base))
+        base_best.setdefault(r["speaker"], []).append(r["best"])
+        if r.get("last") is not None:
+            base_last.setdefault(r["speaker"], []).append(r["last"])
+    shared = sorted(set(best_means) & set(base_best))
     if not shared:
         print("\n기준선과 겹치는 화자가 없다.")
         return
 
-    diffs = [best_means[s] - statistics.mean(base[s]) for s in shared]
+    # 저장값은 검증 화자를 보고 고른 값이라 낙관 편향이 있다. 판정은 마지막 에폭을
+    # 기준으로 내리고, 양쪽 모두에 그 값이 있을 때만 쓴다. 없으면 저장값으로
+    # 물러서되 그 사실을 찍는다. 조용히 편향된 값으로 판정하는 것이 제일 나쁘다.
+    use_last = all(last_means.get(s) is not None and s in base_last for s in shared)
+    if use_last:
+        metric, now, base = "마지막 에폭", last_means, base_last
+    else:
+        metric, now, base = "저장값", best_means, base_best
+
+    diffs = [now[s] - statistics.mean(base[s]) for s in shared]
     mean = statistics.mean(diffs)
     base_worst = min(shared, key=lambda s: statistics.mean(base[s]))
-    now_worst = min(shared, key=lambda s: best_means[s])
+    now_worst = min(shared, key=lambda s: now[s])
+    print()
+    print(f"비교 기준  {metric}")
+    if not use_last:
+        print("           마지막 에폭 값이 양쪽에 다 있지 않아 저장값으로 비교한다.")
+        print("           저장값은 낙관 편향이 있으므로 이 차이는 상한으로 읽을 것.")
     print()
     print("화자   기준선   이번    차이")
     for speaker, diff in zip(shared, diffs):
         print(
             f"{speaker:5s} {statistics.mean(base[speaker]):8.3f}"
-            f" {best_means[speaker]:8.3f} {diff:+8.3f}"
+            f" {now[speaker]:8.3f} {diff:+8.3f}"
         )
     print(f"{'평균':5s} {'':8s} {'':8s} {mean:+8.3f}")
     # 평균이 올라도 최저 화자가 그대로면 화자 독립 관점에서는 진전이 아니다.
     print(
         f"{'최저':5s} {statistics.mean(base[base_worst]):8.3f}"
-        f" {best_means[now_worst]:8.3f}"
-        f" {best_means[now_worst] - statistics.mean(base[base_worst]):+8.3f}"
+        f" {now[now_worst]:8.3f}"
+        f" {now[now_worst] - statistics.mean(base[base_worst]):+8.3f}"
         f"   ({base_worst} → {now_worst})"
     )
 
@@ -239,14 +255,22 @@ def report_health(records, best_means, last_means, peak_means, peaks):
     if len(values) > 1:
         print(f"화자간 SD   {statistics.stdev(values):.3f}")
 
-    # 최고점과 마지막의 차이가 곧 검증 집합 선택 편향의 크기다.
+    # 저장값은 실제로 고른 값이고 최고점은 아무도 고를 수 없는 상한이다.
+    # 낙관 편향의 크기가 서로 다르므로 한 줄로 합치면 안 된다.
+    save_gaps = [
+        best_means[k] - last_means[k]
+        for k in best_means
+        if last_means.get(k) is not None
+    ]
     gaps = [
         peak_means[k] - last_means[k]
         for k in peak_means
         if peak_means[k] is not None and last_means[k] is not None
     ]
+    if save_gaps:
+        print(f"저장 편향   {statistics.mean(save_gaps):.3f}  (저장값 − 마지막)")
     if gaps:
-        print(f"부풀림      {statistics.mean(gaps):.3f}  (최고점 − 마지막)")
+        print(f"상한 여유   {statistics.mean(gaps):.3f}  (최고점 − 마지막)")
 
     saturations = [
         (r["saturation_epoch"], r["config"]["epochs"])
