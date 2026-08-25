@@ -9,7 +9,7 @@
 - pixel range: 0~255
 
 현재 프로젝트 기본 입력:
-- shape: (30, 80, 112, 3)
+- shape: (60, 96, 192, 3)
 """
 
 from __future__ import annotations

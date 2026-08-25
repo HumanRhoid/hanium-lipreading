@@ -15,10 +15,10 @@
 
 ## 2. 공개 API
 
-공개 진입점은 `src.model.ClassificationHead`이다.
+공개 진입점은 `src.ml.models.ClassificationHead`이다.
 
 ```python
-from src.model import ClassificationHead
+from src.ml.models import ClassificationHead
 
 head = ClassificationHead(input_dim=512, num_classes=20, dropout=0.2)
 logits = head(features, padding_mask=padding_mask)
@@ -48,6 +48,16 @@ logits = Linear(D, N)(Dropout(pooled))
 
 유효 시점이 하나도 없는 샘플은 정상적인 입력이 아니므로 `ValueError`를 발생시킨다. 이 계약은 빈 시퀀스가 학습 중 조용히 0 또는 NaN 특징으로 변환되는 것을 막는다.
 
+### 현재 도달하지 않는 경로
+
+헤드는 `padding_mask`를 완전히 구현하지만 **지금 학습·추론 경로는 그것을 넘기지
+않는다.** `LipReadingModel.forward(self, frames)`가 마스크를 받는 인자가 없고
+`self.head(features)`로만 부르기 때문이다. 클립을 전부 같은 프레임 수로
+리샘플링하므로 지금은 패딩이 생기지 않아 동작에는 문제가 없다.
+
+가변 길이를 살리려면 `LipReadingModel.forward`에 인자를 뚫는 것이 먼저다.
+위 §2의 예시는 헤드를 직접 부를 때의 계약이다.
+
 ## 5. 학습과 추론
 
 학습에서는 로짓과 정수 클래스 ID를 사용한다.
@@ -66,6 +76,6 @@ confidence, label_ids = probabilities.topk(k=3, dim=-1)
 
 ## 6. 기준 구현과 테스트
 
-- 기준 구현: [`src/model/classification_head.py`](../src/model/classification_head.py)
-- 공개 모듈: [`src/model/__init__.py`](../src/model/__init__.py)
-- 계약 테스트: [`tests/unit/model/test_classification_head.py`](../tests/unit/model/test_classification_head.py)
+- 기준 구현: [`src/ml/models/classification_head.py`](../src/ml/models/classification_head.py)
+- 공개 모듈: [`src/ml/models/__init__.py`](../src/ml/models/__init__.py)
+- 계약 테스트: [`tests/unit/models/test_classification_head.py`](../tests/unit/models/test_classification_head.py)

@@ -30,16 +30,18 @@ WebSocket 영상 bytes
 
 ## 3. 공개 API
 
-공개 진입점은 `src.model.LipReadingBackbone`이다.
+공개 진입점은 `src.ml.models.LipReadingBackbone`이다.
 
 ```python
-from src.model import LipReadingBackbone
+from src.ml.models import LipReadingBackbone
 
 backbone = LipReadingBackbone()
 features = backbone(frames)
 ```
 
-모듈 import와 모델 생성은 파일·네트워크 접근, 사전학습 가중치 다운로드 또는 장치 이동을 발생시키지 않는다. 장치 선택과 `train()`·`eval()` 모드 전환은 호출자의 책임이다.
+모듈 import는 파일·네트워크 접근을 발생시키지 않는다. 모델 생성도 기본값 `pretrained=False`에서는 마찬가지다.
+
+**예외**: `pretrained=True`로 생성하면 생성자가 `load_imagenet_weights()`를 불러 torchvision의 ImageNet 가중치를 내려받는다. 이 경로는 네트워크에 접근한다. 장치 선택과 `train()`·`eval()` 모드 전환은 호출자의 책임이다.
 
 ## 4. 입력 계약
 
@@ -48,19 +50,23 @@ features = backbone(frames)
 | 항목 | 계약 |
 |---|---|
 | 타입 | `torch.Tensor` |
-| shape | `[B, 3, T, 80, 112]` (`NCTHW`) |
+| shape | `[B, 3, T, 96, 192]` (`NCTHW`) |
 | dtype | 부동소수점 dtype |
 | `B` | 1 이상의 배치 크기 |
 | `T` | 1 이상의 프레임 길이 |
 | 채널 | 3채널 |
-| 공간 크기 | 높이 80, 너비 112 |
+| 공간 크기 | 높이 96, 너비 192 |
 
-NumPy의 `[T, 80, 112, 3]` `uint8` 배열을 사용할 경우, 호출자는 백본 호출 전에 축 순서 변경, 배치 축 추가, 부동소수점 변환과 픽셀 정규화를 완료해야 한다.
+NumPy의 `[T, 96, 192, 3]` `uint8` 배열을 사용할 경우, 호출자는 백본 호출 전에 축 순서 변경, 배치 축 추가, 부동소수점 변환과 픽셀 정규화를 완료해야 한다.
 
 ```python
 frames = torch.from_numpy(array).permute(3, 0, 1, 2)
 frames = frames.unsqueeze(0).float().div(255.0)
 ```
+
+공간 크기는 전처리 출력과 한 값이다. 바꿀 때는 `src/ml/preprocess/normalize.py`의
+`TARGET_HEIGHT`·`TARGET_WIDTH`, 이 문서, 계약 테스트를 **같은 변경 단위에서 함께**
+고친다. 2026-08-22에 `80x112`에서 `96x192`로 올렸다.
 
 백본은 입력을 암묵적으로 스케일링하거나 mean·std 표준화를 수행하지 않는다. 학습과 추론은 동일한 상위 전처리 계약을 사용해야 한다.
 
@@ -83,14 +89,14 @@ frames = frames.unsqueeze(0).float().div(255.0)
 
 | 단계 | 연산 | 출력 shape |
 |---|---|---|
-| 입력 | - | `[B, 3, T, 80, 112]` |
-| 3D stem | `Conv3d(3, 64, kernel=(5,7,7), stride=(1,2,2), padding=(2,3,3))` + BN + ReLU | `[B, 64, T, 40, 56]` |
-| 공간 풀링 | `MaxPool3d(kernel=(1,3,3), stride=(1,2,2), padding=(0,1,1))` | `[B, 64, T, 20, 28]` |
-| 프레임 변환 | `[B,C,T,H,W] -> [B*T,C,H,W]` | `[B*T, 64, 20, 28]` |
-| ResNet layer1 | BasicBlock 2개, 64채널 | `[B*T, 64, 20, 28]` |
-| ResNet layer2 | BasicBlock 2개, 128채널 | `[B*T, 128, 10, 14]` |
-| ResNet layer3 | BasicBlock 2개, 256채널 | `[B*T, 256, 5, 7]` |
-| ResNet layer4 | BasicBlock 2개, 512채널 | `[B*T, 512, 3, 4]` |
+| 입력 | - | `[B, 3, T, 96, 192]` |
+| 3D stem | `Conv3d(3, 64, kernel=(5,7,7), stride=(1,2,2), padding=(2,3,3))` + BN + ReLU | `[B, 64, T, 48, 96]` |
+| 공간 풀링 | `MaxPool3d(kernel=(1,3,3), stride=(1,2,2), padding=(0,1,1))` | `[B, 64, T, 24, 48]` |
+| 프레임 변환 | `[B,C,T,H,W] -> [B*T,C,H,W]` | `[B*T, 64, 24, 48]` |
+| ResNet layer1 | BasicBlock 2개, 64채널 | `[B*T, 64, 24, 48]` |
+| ResNet layer2 | BasicBlock 2개, 128채널 | `[B*T, 128, 12, 24]` |
+| ResNet layer3 | BasicBlock 2개, 256채널 | `[B*T, 256, 6, 12]` |
+| ResNet layer4 | BasicBlock 2개, 512채널 | `[B*T, 512, 3, 6]` |
 | 공간 집계 | Adaptive average pooling | `[B*T, 512]` |
 | 출력 복원 | `[B*T,D] -> [B,T,D]` | `[B, T, 512]` |
 
@@ -110,7 +116,7 @@ frames = frames.unsqueeze(0).float().div(255.0)
 - BatchNorm의 scale은 1, bias는 0으로 초기화한다.
 - 모델 상태는 표준 PyTorch `state_dict` 형식과 호환되어야 한다.
 - 사전학습 가중치를 사용하더라도 생성자와 `forward`의 공개 계약은 변경하지 않는다.
-- 백본은 스스로 외부 가중치를 검색하거나 다운로드하지 않는다.
+- 백본은 기본값 `pretrained=False`에서 외부 가중치를 검색하거나 다운로드하지 않는다. `pretrained=True`는 예외이며 §3을 따른다.
 
 ## 9. 입력 검증과 실패 방식
 
@@ -119,7 +125,7 @@ frames = frames.unsqueeze(0).float().div(255.0)
 | `torch.Tensor`가 아님 | `TypeError` |
 | 5차원 `[B,C,T,H,W]`가 아님 | `ValueError` |
 | 채널 수가 3이 아님 | `ValueError` |
-| 공간 크기가 `(80, 112)`가 아님 | `ValueError` |
+| 공간 크기가 `(96, 192)`가 아님 | `ValueError` |
 | `B` 또는 `T`가 0 | `ValueError` |
 | 정수형 텐서 | `TypeError` |
 
@@ -139,8 +145,8 @@ frames = frames.unsqueeze(0).float().div(255.0)
 
 ## 11. 기준 구현과 계약 테스트
 
-- 기준 구현: [`src/model/backbone.py`](../src/model/backbone.py)
-- 공개 모듈: [`src/model/__init__.py`](../src/model/__init__.py)
-- 계약 테스트: [`tests/unit/model/test_backbone.py`](../tests/unit/model/test_backbone.py)
+- 기준 구현: [`src/ml/models/backbone.py`](../src/ml/models/backbone.py)
+- 공개 모듈: [`src/ml/models/__init__.py`](../src/ml/models/__init__.py)
+- 계약 테스트: [`tests/unit/models/test_backbone.py`](../tests/unit/models/test_backbone.py)
 
 테스트는 이 문서의 계약을 실행 가능한 형태로 검증하지만, 테스트 코드가 이 문서를 대신하지는 않는다.
