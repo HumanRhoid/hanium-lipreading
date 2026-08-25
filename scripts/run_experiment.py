@@ -68,11 +68,17 @@ def check_config(records, config):
     # seed와 val_speakers는 한 실험 안에서 런마다 달라지는 것이 정상이다.
     # 교차검증은 화자를 하나씩 바꿔가며 도는데 그것을 오염으로 판정하면
     # 두 번째 화자에서 항상 멈춘다.
-    varies = {"seed", "val_speakers"}
+    #
+    # manifest와 data_root는 기록은 하되 대조하지 않는다. Colab은 같은 데이터도
+    # 세션에 따라 /content/data와 드라이브 경로를 오가므로 경로가 같은지는
+    # 데이터가 같은지를 뜻하지 않는다. 증강 설정과 증강 구현은 그 반대라 대조한다.
+    varies = {"seed", "val_speakers", "manifest", "data_root"}
+    # 이전 기록에 없던 항목은 대조하지 않는다. 기록 항목을 늘릴 때마다 옛 결과
+    # 파일을 이어받지 못하고 멈추면 실험이 통째로 막힌다.
     changed = {
-        key: (previous.get(key), value)
+        key: (previous[key], value)
         for key, value in config.items()
-        if key not in varies and previous.get(key) != value
+        if key not in varies and key in previous and previous[key] != value
     }
     if changed:
         lines = [f"  {k}: {old} → {new}" for k, (old, new) in changed.items()]
@@ -282,6 +288,11 @@ def parse_args():
     p.add_argument("--smoothing", type=int, default=3)
     p.add_argument("--num-workers", type=int, default=8)
     p.add_argument("--no-augment", action="store_true", help="공간 증강을 끈다")
+    p.add_argument(
+        "--deterministic",
+        action="store_true",
+        help="cuDNN 결정성을 켠다. 같은 시드가 같은 값을 내는지 확인할 때 쓴다",
+    )
     p.add_argument("--wandb-project", default=None)
     p.add_argument("--summary", action="store_true", help="학습 없이 요약만 출력")
     p.add_argument("--baseline", default=None, help="비교할 실험 이름")
@@ -342,6 +353,7 @@ def main():
                 dropout=args.dropout,
                 smoothing=args.smoothing,
                 augment=not args.no_augment,
+                deterministic=args.deterministic,
                 wandb_project=args.wandb_project,
                 run_name=f"{args.name}_{speaker}_seed{seed}",
             )

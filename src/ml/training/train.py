@@ -28,11 +28,17 @@ def resolve_device(prefer_gpu=True):
     return torch.device("cpu")
 
 
-def set_seed(seed):
+def set_seed(seed, deterministic=False):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
+    # cuDNN은 합성곱·GRU 역전파에 비결정적 알고리즘을 고른다. 같은 시드가 같은
+    # 값을 안 내는 원인 후보다. 켜면 느려지고 과거 런과 값이 달라지므로 기본은
+    # 끔이고, 원인을 재려면 같은 설정으로 두 번 돌려 비교한다.
+    if deterministic:
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
 
 def start_tracking(project, run_name, config):
@@ -219,12 +225,13 @@ def train(
     ema_decay=0.999,
     augment=True,
     augmentation_config=None,
+    deterministic=False,
     pretrained=False,
     freeze_backbone=False,
     wandb_project=None,
     run_name=None,
 ):
-    set_seed(seed)
+    set_seed(seed, deterministic)
     device = resolve_device(prefer_gpu)
     # 혼합정밀도는 CUDA에서만 의미가 있다.
     amp = amp and device.type == "cuda"
@@ -246,6 +253,7 @@ def train(
         "augment": augment,
         "pretrained": pretrained,
         "freeze_backbone": freeze_backbone,
+        "deterministic": deterministic,
         "amp": amp,
     }
 
@@ -261,6 +269,16 @@ def train(
         imagenet_norm=pretrained,
     )
     plain = LipReadingDataset(manifest_path, data_root, imagenet_norm=pretrained)
+
+    # 재현에 필요한데 기록되지 않던 것들. 어떤 데이터로 어떤 증강을 걸고 돌았는지
+    # 로그에도 결과 파일에도 안 남아서, 끝난 실험을 나중에 되짚을 수 없었다.
+    config["manifest"] = str(manifest_path)
+    config["data_root"] = str(data_root)
+    config["augmentation_config"] = repr(augmentation.config) if augmentation else None
+    # 노트북에서 VideoAugmentation.__call__을 갈아끼워 시간축 증강을 거는 실험이
+    # 있다. 패치가 남은 채로 돈 런이 실제로 있었으므로(2026-08-20) 어느 구현으로
+    # 돌았는지 남긴다. 원본이면 "VideoAugmentation.__call__"이다.
+    config["augmentation_call"] = VideoAugmentation.__call__.__qualname__
     num_classes = len({row["label_id"] for row in plain.rows})
 
     train_indices, val_indices, held_out = split_by_speaker(
@@ -332,6 +350,10 @@ def train(
         f"label smoothing {label_smoothing} · grad clip {grad_clip} "
         f"· EMA {ema_decay or '끔'} | 저장 기준 최근 {smoothing}에폭 평균"
     )
+    print(f"매니페스트 {manifest_path}")
+    print(f"데이터 {data_root} | cuDNN 결정성 {'켬' if deterministic else '끔'}")
+    if config["augmentation_call"] != "VideoAugmentation.__call__":
+        print(f"[주의] 증강 구현이 원본이 아니다: {config['augmentation_call']}")
 
     checkpoint_path = Path(checkpoint_path)
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
@@ -498,6 +520,11 @@ def parse_args():
         "--no-augment", action="store_true", help="증강 없이 학습해 효과를 비교한다"
     )
     parser.add_argument(
+        "--deterministic",
+        action="store_true",
+        help="cuDNN 결정성을 켠다. 느려지지만 재현성을 확인할 때 쓴다",
+    )
+    parser.add_argument(
         "--pretrained",
         action="store_true",
         help="ImageNet 가중치로 백본을 초기화한다",
@@ -541,6 +568,7 @@ def main():
         grad_clip=args.grad_clip,
         ema_decay=args.ema_decay,
         augment=not args.no_augment,
+        deterministic=args.deterministic,
         pretrained=args.pretrained,
         freeze_backbone=args.freeze_backbone,
         wandb_project=args.wandb_project,
