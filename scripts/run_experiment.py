@@ -82,10 +82,13 @@ def check_config(records, config):
     }
     if changed:
         lines = [f"  {k}: {old} → {new}" for k, (old, new) in changed.items()]
-        raise SystemExit(
-            "이미 기록된 런과 설정이 다르다. 다른 이름으로 돌리거나 결과 파일을 지울 것.\n"
-            + "\n".join(lines)
+    raise SystemExit(
+        "\n".join(
+            [f"'{args.name}'에 이미 {len(records)}런이 쌓여 있는데 설정이 다르다."]
+            + lines
+            + ["다른 이름을 쓰거나, 섞을 작정이면 기존 파일을 치워라."]
         )
+    )
 
 
 def label_names(manifest_path):
@@ -299,6 +302,12 @@ def parse_args():
     p.add_argument("--manifest", type=Path, default=PROJECT_ROOT / "data" / "manifest.csv")
     p.add_argument("--data-root", type=Path, default=PROJECT_ROOT / "data")
     p.add_argument("--checkpoint-dir", type=Path, default=PROJECT_ROOT / "checkpoints")
+    p.add_argument(
+        "--results-dir",
+        type=Path,
+        default=RESULTS_DIR,
+        help="결과 JSON을 쌓을 곳. 코랩에서는 드라이브를 가리켜야 세션이 끝나도 남는다",
+    )
     p.add_argument("--exclude", nargs="*", default=[], help="학습과 평가 양쪽에서 뺄 화자")
     p.add_argument("--speakers", nargs="*", default=None, help="검증할 화자. 생략하면 전체")
     p.add_argument("--seeds", nargs="*", type=int, default=[42])
@@ -314,8 +323,10 @@ def parse_args():
     p.add_argument("--no-augment", action="store_true", help="공간 증강을 끈다")
     p.add_argument(
         "--deterministic",
-        action="store_true",
-        help="cuDNN 결정성을 켠다. 같은 시드가 같은 값을 내는지 확인할 때 쓴다",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="cuDNN 결정성. 기본 켬. --no-deterministic으로 끄면 빨라지지만 "
+        "같은 시드가 같은 값을 안 낸다",
     )
     p.add_argument("--wandb-project", default=None)
     p.add_argument("--summary", action="store_true", help="학습 없이 요약만 출력")
@@ -323,15 +334,61 @@ def parse_args():
     return p.parse_args()
 
 
+# CLI가 정하는 설정 키. 이 값들이 기존 기록과 다르면 같은 이름에 섞으면 안 된다.
+CLI_KEYS = {
+    "epochs": "epochs",
+    "batch_size": "batch_size",
+    "learning_rate": "learning_rate",
+    "hidden_dim": "hidden_dim",
+    "num_layer": "num_layer",
+    "dropout": "dropout",
+    "ema_decay": "ema_decay",
+    "smoothing": "smoothing",
+    "deterministic": "deterministic",
+}
+
+
+def precheck_config(records, args):
+    """학습을 걸기 전에 설정 충돌을 잡는다.
+
+    check_config는 train()이 끝난 뒤에야 돌아서, 잘못 섞었다는 걸 알 때는 이미
+    수십 분을 쓴 뒤다. CLI가 정하는 값만이라도 미리 견준다.
+    """
+    if not records:
+        return
+    previous = records[0]["config"]
+    changed = {}
+    for key, attr in CLI_KEYS.items():
+        if key in previous and previous[key] != getattr(args, attr):
+            changed[key] = (previous[key], getattr(args, attr))
+    if previous.get("augment") is not None and previous["augment"] == args.no_augment:
+        changed["augment"] = (previous["augment"], not args.no_augment)
+    if previous.get("excluded") is not None and previous["excluded"] != sorted(args.exclude):
+        changed["excluded"] = (previous["excluded"], sorted(args.exclude))
+    if not changed:
+        return
+    lines = [f"  {k}: {before} -> {after}" for k, (before, after) in changed.items()]
+    raise SystemExit(
+        "\n".join(
+            [f"'{args.name}'에 이미 {len(records)}런이 쌓여 있는데 설정이 다르다."]
+            + lines
+            + ["다른 이름을 쓰거나, 섞을 작정이면 기존 파일을 치워라."]
+        )
+    )
+
+
 def main():
     args = parse_args()
-    RESULTS_DIR.mkdir(exist_ok=True)
-    result_path = RESULTS_DIR / f"{args.name}.json"
+    results_dir = args.results_dir
+    results_dir.mkdir(parents=True, exist_ok=True)
+    result_path = results_dir / f"{args.name}.json"
     records = load(result_path)
 
     baseline = None
     if args.baseline:
-        baseline_path = RESULTS_DIR / f"{args.baseline}.json"
+        baseline_path = results_dir / f"{args.baseline}.json"
+        if not baseline_path.exists() and results_dir != RESULTS_DIR:
+            baseline_path = RESULTS_DIR / f"{args.baseline}.json"
         if not baseline_path.exists():
             raise SystemExit(f"기준선 파일이 없다: {baseline_path}")
         baseline = load(baseline_path)
@@ -341,9 +398,12 @@ def main():
         summarize(records, baseline, names)
         return
 
+    # torch를 불러오기 전에 막는다. 설정이 어긋났으면 여기서 끝나야 한다.
+    precheck_config(records, args)
+
     manifest = args.manifest
     if args.exclude:
-        manifest = RESULTS_DIR / f"manifest_{args.name}.csv"
+        manifest = results_dir / f"manifest_{args.name}.csv"
         filter_manifest(args.manifest, set(args.exclude), manifest)
 
     from src.ml.training.train import train
