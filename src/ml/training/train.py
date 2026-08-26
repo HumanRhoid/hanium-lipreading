@@ -188,16 +188,23 @@ def collect_errors(model, loader, device, amp=False):
     어느 문구끼리 헷갈리는지가 다음 개입을 정한다. 2026-08-19에 손으로 뽑아
     s07의 물주세요-토할거같아요 쌍을 찾은 작업을 자동화한 것이다.
     보고값과 맞추기 위해 저장 시점이 아니라 마지막 에폭 가중치를 쓴다.
+
+    노트북 실험이 데이터셋을 갈아끼워 배치가 (frames, 보조, label)로 셋이
+    되는 일이 있다(랜드마크 융합, 오디오 증류). 그때 `run_epoch`만 갈아끼우고
+    여기를 빼먹어 80에폭을 다 돌고 마지막 줄에서 터진 사고가 세 번 났다.
+    배치 길이에 상관없이 첫 텐서를 입력, 마지막을 정답, 사이를 보조로 본다.
     """
     model.eval()
     counts = {}
     total = 0
     with torch.no_grad():
-        for frames, labels in loader:
+        for batch in loader:
+            frames, labels = batch[0], batch[-1]
+            extra = [t.to(device, non_blocking=True) for t in batch[1:-1]]
             frames = frames.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
             with torch.autocast("cuda", dtype=torch.bfloat16, enabled=amp):
-                predicted = model(frames).argmax(dim=1)
+                predicted = model(frames, *extra).argmax(dim=1)
             for true_id, pred_id in zip(labels.tolist(), predicted.tolist()):
                 total += 1
                 if true_id != pred_id:

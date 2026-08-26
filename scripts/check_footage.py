@@ -27,10 +27,17 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 VIDEO_EXTS = (".mp4", ".avi", ".mov")
 
-# 전처리와 같은 값. 여기가 바뀌면 판정 기준도 함께 바뀐다.
+# 전처리와 같은 값이어야 한다. 손으로 적어 두었더니 2026-08-22에 규격이
+# 192x96으로 바뀐 뒤에도 112x80으로 남아 판정이 어긋났다. 상수를 직접 읽는다.
+from src.ml.preprocess.normalize import (  # noqa: E402
+    FIXED_FRAME_COUNT,
+    TARGET_HEIGHT,
+    TARGET_WIDTH,
+)
+
 MARGIN = 0.5
-TARGET_W, TARGET_H = 112, 80
-FIXED_FRAMES = 60
+TARGET_W, TARGET_H = TARGET_WIDTH, TARGET_HEIGHT
+FIXED_FRAMES = FIXED_FRAME_COUNT
 
 
 def find_clips(source):

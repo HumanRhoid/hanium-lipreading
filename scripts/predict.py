@@ -83,7 +83,7 @@ def parse_args():
         nargs="+",
         type=Path,
         default=None,
-        help="생략하면 checkpoints/release_seed*.pt를 모두 쓴다",
+        help="생략하면 checkpoints/release192_seed*.pt를 모두 쓴다",
     )
     p.add_argument("--cpu", action="store_true")
     p.add_argument(
@@ -97,7 +97,7 @@ def main():
 
     paths = args.checkpoint
     if paths is None:
-        paths = sorted((PROJECT_ROOT / "checkpoints").glob("release_seed*.pt"))
+        paths = sorted((PROJECT_ROOT / "checkpoints").glob("release192_seed*.pt"))
     if not paths:
         raise SystemExit(
             "체크포인트가 없다. 먼저 python scripts/train_release.py 를 돌릴 것"
