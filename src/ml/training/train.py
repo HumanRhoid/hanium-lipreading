@@ -28,14 +28,18 @@ def resolve_device(prefer_gpu=True):
     return torch.device("cpu")
 
 
-def set_seed(seed, deterministic=False):
+def set_seed(seed, deterministic=True):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-    # cuDNN은 합성곱·GRU 역전파에 비결정적 알고리즘을 고른다. 같은 시드가 같은
-    # 값을 안 내는 원인 후보다. 켜면 느려지고 과거 런과 값이 달라지므로 기본은
-    # 끔이고, 원인을 재려면 같은 설정으로 두 번 돌려 비교한다.
+    # cuDNN은 합성곱·GRU 역전파에 비결정적 알고리즘을 고른다. 2026-08-25 align
+    # 재측정에서 같은 시드·같은 설정이 s01에서 평균 -0.030 어긋났다. 조건을
+    # 아무것도 안 바꿔도 판정선(0.042)에 육박하는 잡음이 섞이므로 기본을 켬으로
+    # 둔다. benchmark 자동 탐색을 끄는 만큼 느려진다.
+    # 주의: cuDNN 밖의 비결정 연산(atomics 등)은 이걸로 안 잡힌다.
+    # torch.use_deterministic_algorithms는 대체 구현이 없는 연산에서 예외를
+    # 던져 학습이 멈추므로 쓰지 않는다.
     if deterministic:
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
@@ -225,7 +229,7 @@ def train(
     ema_decay=0.999,
     augment=True,
     augmentation_config=None,
-    deterministic=False,
+    deterministic=True,
     pretrained=False,
     freeze_backbone=False,
     wandb_project=None,
@@ -521,8 +525,10 @@ def parse_args():
     )
     parser.add_argument(
         "--deterministic",
-        action="store_true",
-        help="cuDNN 결정성을 켠다. 느려지지만 재현성을 확인할 때 쓴다",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="cuDNN 결정성. 기본 켬. --no-deterministic으로 끄면 빨라지지만 "
+        "같은 시드가 같은 값을 안 낸다",
     )
     parser.add_argument(
         "--pretrained",
