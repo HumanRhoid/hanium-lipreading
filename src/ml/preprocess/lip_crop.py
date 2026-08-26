@@ -1,4 +1,5 @@
 import math
+import urllib.request
 from pathlib import Path
 
 import cv2
@@ -10,6 +11,10 @@ from src.ml.preprocess.normalize import TARGET_HEIGHT, TARGET_WIDTH
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_MODEL_PATH = PROJECT_ROOT / "models" / "face_landmarker.task"
+LANDMARKER_URL = (
+    "https://storage.googleapis.com/mediapipe-models/face_landmarker"
+    "/face_landmarker/float16/1/face_landmarker.task"
+)
 
 LIP_LANDMARKS = [
     61,
@@ -37,6 +42,18 @@ LIP_LANDMARKS = [
 
 
 def create_landmarker(model_path=DEFAULT_MODEL_PATH):
+    """FaceLandmarker를 만든다. 모델 파일이 없으면 내려받는다.
+
+    3.7MB짜리라 저장소에 넣지 않는다. 노트북에서 내려받는 셀을 건너뛰면
+    추론이 FileNotFoundError로 죽었다. 체크포인트만 받아 쓰는 사람도
+    같은 곳에서 막히므로 여기서 처리한다.
+    """
+    model_path = Path(model_path)
+    if not model_path.exists():
+        model_path.parent.mkdir(parents=True, exist_ok=True)
+        print(f"랜드마커 모델을 내려받습니다: {model_path}")
+        urllib.request.urlretrieve(LANDMARKER_URL, str(model_path))
+
     base_options = python.BaseOptions(model_asset_path=str(model_path))
     options = vision.FaceLandmarkerOptions(base_options=base_options, num_faces=1)
     return vision.FaceLandmarker.create_from_options(options)
