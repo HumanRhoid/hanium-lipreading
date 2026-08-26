@@ -2,7 +2,7 @@
 
 from sqlalchemy import CheckConstraint, UniqueConstraint
 
-from src.backend.auth.adapters import repository as auth_repository  # noqa: F401
+from src.backend.auth.adapters.repository import User
 from src.backend.core.database import Base
 from src.backend.recognition.adapters.repository import (
     Phrase,
@@ -29,6 +29,28 @@ def test_metadata_contains_expected_tables():
     }
 
 
+def test_user_matches_account_contract():
+    table = User.__table__
+
+    assert set(table.columns.keys()) == {
+        "user_id",
+        "username",
+        "password_hash",
+        "display_name",
+        "created_at",
+    }
+
+    assert table.c.user_id.primary_key is True
+    assert table.c.username.nullable is False
+    assert table.c.password_hash.nullable is False
+    assert table.c.display_name.nullable is False
+
+    assert "uq_users_username" in constraint_names(
+        table,
+        UniqueConstraint,
+    )
+
+
 def test_session_matches_erd_contract():
     table = RecognitionSession.__table__
 
@@ -38,6 +60,7 @@ def test_session_matches_erd_contract():
         "started_at",
         "ended_at",
     }
+
     assert table.c.session_id.primary_key is True
     assert table.c.ended_at.nullable is True
     assert "ck_session_mode" in constraint_names(table, CheckConstraint)
@@ -45,6 +68,7 @@ def test_session_matches_erd_contract():
         table,
         CheckConstraint,
     )
+
     assert {index.name for index in table.indexes} == {"ix_session_started_at"}
 
 
@@ -57,14 +81,17 @@ def test_phrase_uses_stable_unique_code():
         "phrase_text",
         "category",
     }
+
     assert "uq_phrase_phrase_code" in constraint_names(
         table,
         UniqueConstraint,
     )
+
     assert "ck_phrase_category" in constraint_names(
         table,
         CheckConstraint,
     )
+
     assert "ck_phrase_text_not_blank" in constraint_names(
         table,
         CheckConstraint,
@@ -83,7 +110,9 @@ def test_utterance_matches_storage_and_deletion_contract():
         "confidence",
         "created_at",
     }
+
     assert table.c.phrase_id.nullable is True
+
     assert "ck_utterance_confidence_range" in constraint_names(
         table,
         CheckConstraint,
@@ -92,6 +121,7 @@ def test_utterance_matches_storage_and_deletion_contract():
     foreign_keys = {
         foreign_key.parent.name: foreign_key for foreign_key in table.foreign_keys
     }
+
     assert foreign_keys["session_id"].ondelete == "CASCADE"
     assert foreign_keys["phrase_id"].ondelete == "SET NULL"
 
@@ -106,4 +136,5 @@ def test_utterance_has_session_created_at_index():
         "session_id",
         "created_at",
     )
+
     assert indexes["ix_utterance_phrase_id"] == ("phrase_id",)

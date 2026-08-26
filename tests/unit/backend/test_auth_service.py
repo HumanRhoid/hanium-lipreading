@@ -34,17 +34,13 @@ class FakeAuthRepository:
         *,
         username: str,
         password_hash: str,
-        name: str,
-        hospital: str,
-        ward: str | None,
+        display_name: str,
     ) -> User:
         user = User(
             user_id=self.next_user_id,
             username=username,
             password_hash=password_hash,
-            name=name,
-            hospital=hospital,
-            ward=ward,
+            display_name=display_name,
         )
 
         self.next_user_id += 1
@@ -129,16 +125,12 @@ async def test_signup_creates_user_with_hashed_password(
     user = await auth_service.signup(
         username="testuser1",
         password="test12345",
-        name="테스트사용자",
-        hospital="테스트병원",
-        ward="101병동",
+        display_name="테스트사용자",
     )
 
     assert user.user_id == 1
     assert user.username == "testuser1"
-    assert user.name == "테스트사용자"
-    assert user.hospital == "테스트병원"
-    assert user.ward == "101병동"
+    assert user.display_name == "테스트사용자"
 
     stored_user = repository.users["testuser1"]
 
@@ -155,18 +147,14 @@ async def test_signup_rejects_duplicate_username(
     await auth_service.signup(
         username="testuser1",
         password="test12345",
-        name="테스트사용자",
-        hospital="테스트병원",
-        ward=None,
+        display_name="테스트사용자",
     )
 
     with pytest.raises(UsernameAlreadyExistsError):
         await auth_service.signup(
             username="testuser1",
             password="another123",
-            name="다른사용자",
-            hospital="다른병원",
-            ward=None,
+            display_name="다른사용자",
         )
 
 
@@ -177,9 +165,7 @@ async def test_login_creates_session(
     user = await auth_service.signup(
         username="testuser1",
         password="test12345",
-        name="테스트사용자",
-        hospital="테스트병원",
-        ward="101병동",
+        display_name="테스트사용자",
     )
 
     login_session = await auth_service.login(
@@ -200,9 +186,7 @@ async def test_login_rejects_wrong_password(
     await auth_service.signup(
         username="testuser1",
         password="test12345",
-        name="테스트사용자",
-        hospital="테스트병원",
-        ward=None,
+        display_name="테스트사용자",
     )
 
     with pytest.raises(InvalidCredentialsError):
@@ -218,9 +202,7 @@ async def test_current_user_is_found_by_session_token(
     user = await auth_service.signup(
         username="testuser1",
         password="test12345",
-        name="테스트사용자",
-        hospital="테스트병원",
-        ward=None,
+        display_name="테스트사용자",
     )
 
     login_session = await auth_service.login(
@@ -232,6 +214,7 @@ async def test_current_user_is_found_by_session_token(
 
     assert current_user.user_id == user.user_id
     assert current_user.username == "testuser1"
+    assert current_user.display_name == "테스트사용자"
 
 
 async def test_logout_revokes_session(
@@ -241,9 +224,7 @@ async def test_logout_revokes_session(
     await auth_service.signup(
         username="testuser1",
         password="test12345",
-        name="테스트사용자",
-        hospital="테스트병원",
-        ward=None,
+        display_name="테스트사용자",
     )
 
     login_session = await auth_service.login(

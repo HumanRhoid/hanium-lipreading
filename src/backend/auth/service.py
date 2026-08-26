@@ -44,11 +44,9 @@ class AuthService:
         *,
         username: str,
         password: str,
-        name: str,
-        hospital: str,
-        ward: str | None,
+        display_name: str,
     ) -> User:
-        """새 의료진 회원을 생성한다."""
+        """새 사용자 계정을 생성한다."""
 
         existing_user = await self._repository.get_user_by_username(username)
 
@@ -60,9 +58,7 @@ class AuthService:
         return await self._repository.create_user(
             username=username,
             password_hash=password_hash,
-            name=name,
-            hospital=hospital,
-            ward=ward,
+            display_name=display_name,
         )
 
     async def login(
