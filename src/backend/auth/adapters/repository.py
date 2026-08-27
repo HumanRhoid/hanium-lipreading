@@ -1,6 +1,7 @@
-"""회원 및 로그인 세션의 SQLAlchemy 모델과 PostgreSQL repository."""
+"""사용자 및 로그인 세션 SQLAlchemy 모델과 PostgreSQL repository."""
 
 from datetime import datetime, timezone
+from uuid import UUID, uuid4
 
 from sqlalchemy import (
     DateTime,
@@ -9,6 +10,7 @@ from sqlalchemy import (
     Integer,
     String,
     UniqueConstraint,
+    Uuid,
     func,
     select,
 )
@@ -19,15 +21,24 @@ from src.backend.core.database import Base
 
 
 class User(Base):
-    """의료진 회원 정보를 저장하는 사용자 모델."""
+    """사용자 계정 정보를 저장하는 모델."""
 
     __tablename__ = "users"
-    __table_args__ = (UniqueConstraint("username"),)
+    __table_args__ = (
+        UniqueConstraint("username"),
+        UniqueConstraint("storage_uuid"),
+    )
 
     user_id: Mapped[int] = mapped_column(
         Integer,
         Identity(),
         primary_key=True,
+    )
+
+    storage_uuid: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        nullable=False,
+        default=uuid4,
     )
 
     username: Mapped[str] = mapped_column(
@@ -40,19 +51,9 @@ class User(Base):
         nullable=False,
     )
 
-    name: Mapped[str] = mapped_column(
+    display_name: Mapped[str] = mapped_column(
         String(50),
         nullable=False,
-    )
-
-    hospital: Mapped[str] = mapped_column(
-        String(100),
-        nullable=False,
-    )
-
-    ward: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
     )
 
     created_at: Mapped[datetime] = mapped_column(
@@ -102,7 +103,7 @@ class LoginSession(Base):
 
 
 class SQLAlchemyAuthRepository:
-    """회원 및 로그인 세션 DB 접근을 담당한다."""
+    """사용자 및 로그인 세션 DB 접근을 담당한다."""
 
     def __init__(
         self,
@@ -110,12 +111,17 @@ class SQLAlchemyAuthRepository:
     ) -> None:
         self._session_factory = session_factory
 
-    async def get_user_by_username(self, username: str) -> User | None:
-        """username으로 회원을 조회한다."""
+    async def get_user_by_username(
+        self,
+        username: str,
+    ) -> User | None:
+        """username으로 사용자를 조회한다."""
 
         async with self._session_factory() as session:
             result = await session.execute(
-                select(User).where(User.username == username)
+                select(User).where(
+                    User.username == username,
+                )
             )
             return result.scalar_one_or_none()
 
@@ -124,18 +130,14 @@ class SQLAlchemyAuthRepository:
         *,
         username: str,
         password_hash: str,
-        name: str,
-        hospital: str,
-        ward: str | None,
+        display_name: str,
     ) -> User:
-        """새 회원을 생성한다."""
+        """새 사용자를 생성한다."""
 
         user = User(
             username=username,
             password_hash=password_hash,
-            name=name,
-            hospital=hospital,
-            ward=ward,
+            display_name=display_name,
         )
 
         async with self._session_factory.begin() as session:

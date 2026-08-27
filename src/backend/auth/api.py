@@ -40,7 +40,7 @@ async def signup(
     payload: SignupRequest,
     request: Request,
 ) -> SignupResponse:
-    """새 의료진 회원을 생성한다."""
+    """새 사용자 계정을 생성한다."""
 
     service = get_auth_service(request)
 
@@ -48,9 +48,7 @@ async def signup(
         user = await service.signup(
             username=payload.username,
             password=payload.password,
-            name=payload.name,
-            hospital=payload.hospital,
-            ward=payload.ward,
+            display_name=payload.display_name,
         )
     except UsernameAlreadyExistsError as exc:
         raise HTTPException(
@@ -61,9 +59,7 @@ async def signup(
     return SignupResponse(
         user_id=user.user_id,
         username=user.username,
-        name=user.name,
-        hospital=user.hospital,
-        ward=user.ward,
+        display_name=user.display_name,
     )
 
 
@@ -107,7 +103,7 @@ async def get_current_user(
         Header(alias="X-Session-Token"),
     ],
 ) -> CurrentUserResponse:
-    """현재 로그인한 의료진의 정보를 반환한다."""
+    """현재 로그인한 사용자 정보를 반환한다."""
 
     service = get_auth_service(request)
 
@@ -122,9 +118,7 @@ async def get_current_user(
     return CurrentUserResponse(
         user_id=user.user_id,
         username=user.username,
-        name=user.name,
-        hospital=user.hospital,
-        ward=user.ward,
+        display_name=user.display_name,
     )
 
 

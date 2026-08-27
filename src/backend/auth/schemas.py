@@ -1,4 +1,4 @@
-"""회원가입 및 로그인 API의 요청/응답 데이터 형식."""
+"""회원가입 및 로그인 API 요청/응답 스키마."""
 
 from datetime import datetime
 
@@ -12,9 +12,7 @@ class SignupRequest(BaseModel):
 
     username: str = Field(min_length=4, max_length=50)
     password: str = Field(min_length=8, max_length=128)
-    name: str = Field(min_length=1, max_length=50)
-    hospital: str = Field(min_length=1, max_length=100)
-    ward: str | None = Field(default=None, max_length=100)
+    display_name: str = Field(min_length=1, max_length=50)
 
 
 class SignupResponse(BaseModel):
@@ -24,9 +22,7 @@ class SignupResponse(BaseModel):
 
     user_id: int
     username: str
-    name: str
-    hospital: str
-    ward: str | None
+    display_name: str
 
 
 class LoginRequest(BaseModel):
@@ -54,9 +50,7 @@ class CurrentUserResponse(BaseModel):
 
     user_id: int
     username: str
-    name: str
-    hospital: str
-    ward: str | None
+    display_name: str
 
 
 class LogoutResponse(BaseModel):
