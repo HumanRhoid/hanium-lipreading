@@ -5,12 +5,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
+
+from src.ml.preprocess.normalize import (
+    FIXED_FRAME_COUNT,
+    TARGET_HEIGHT,
+    TARGET_WIDTH,
+)
 import pytest
 
 from src.backend.recognition.domain import (
-    INPUT_FRAME_COUNT,
-    INPUT_FRAME_HEIGHT,
-    INPUT_FRAME_WIDTH,
     Prediction,
     RecognitionMode,
 )
@@ -309,9 +312,9 @@ async def test_ml_preprocessor_reuses_existing_video_processor_and_encodes_jpeg(
 
         return np.zeros(
             (
-                INPUT_FRAME_COUNT,
-                INPUT_FRAME_HEIGHT,
-                INPUT_FRAME_WIDTH,
+                FIXED_FRAME_COUNT,
+                TARGET_HEIGHT,
+                TARGET_WIDTH,
                 3,
             ),
             dtype=np.uint8,
@@ -327,13 +330,13 @@ async def test_ml_preprocessor_reuses_existing_video_processor_and_encodes_jpeg(
         object_key=OBJECT_KEY,
     )
 
-    assert len(frames) == INPUT_FRAME_COUNT
+    assert len(frames) == FIXED_FRAME_COUNT
     assert all(frame.startswith(b"\xff\xd8") for frame in frames)
 
     assert captured["suffix"] == ".webm"
     assert captured["data"] == b"webm-video"
     assert captured["landmarker"] is landmarker
-    assert captured["frames"] == INPUT_FRAME_COUNT
+    assert captured["frames"] == FIXED_FRAME_COUNT
     assert landmarker.closed is True
 
     temporary_path = captured["path"]
@@ -406,12 +409,7 @@ async def test_ml_preprocessor_fails_when_existing_processor_cannot_find_lips():
 
 async def test_ml_preprocessor_rejects_wrong_existing_preprocess_shape():
     wrong_shape = np.zeros(
-        (
-            1,
-            INPUT_FRAME_HEIGHT,
-            INPUT_FRAME_WIDTH,
-            3,
-        ),
+        (1, 360, 640, 3),   # 크롭 규격(60, 96, 192, 3)이 아니기만 하면 된다
         dtype=np.uint8,
     )
 

@@ -6,10 +6,10 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Protocol
 
 from src.backend.recognition.domain import (
-    INPUT_FRAME_COUNT,
-    INPUT_FRAME_FPS,
-    INPUT_FRAME_HEIGHT,
-    INPUT_FRAME_WIDTH,
+    MODEL_INPUT_FRAME_COUNT,
+    STREAM_FRAME_FPS,
+    STREAM_FRAME_HEIGHT,
+    STREAM_FRAME_WIDTH,
     ModelManifest,
     Prediction,
     RecognitionMode,
@@ -193,10 +193,10 @@ class FakeSyncPredictor:
     manifest = ModelManifest(
         bundle_version="fake-v1",
         supported_modes=frozenset(RecognitionMode),
-        frame_width=INPUT_FRAME_WIDTH,
-        frame_height=INPUT_FRAME_HEIGHT,
-        fps=INPUT_FRAME_FPS,
-        input_frame_count=INPUT_FRAME_COUNT,
+        frame_width=STREAM_FRAME_WIDTH,
+        frame_height=STREAM_FRAME_HEIGHT,
+        fps=STREAM_FRAME_FPS,
+        input_frame_count=MODEL_INPUT_FRAME_COUNT,
         label_map_version="demo-v1",
     )
 
@@ -209,8 +209,8 @@ class FakeSyncPredictor:
     def predict(self, frames: Sequence[bytes], mode: RecognitionMode) -> Prediction:
         if not self.ready:
             raise ModelNotReadyError("fake predictor가 시작되지 않았습니다")
-        if len(frames) != INPUT_FRAME_COUNT:
-            raise ValueError(f"정확히 {INPUT_FRAME_COUNT}프레임이 필요합니다")
+        if len(frames) != MODEL_INPUT_FRAME_COUNT:
+            raise ValueError(f"정확히 {MODEL_INPUT_FRAME_COUNT}프레임이 필요합니다")
         if mode == RecognitionMode.CLOSED:
             return Prediction("물 주세요", 0.91, "REQUEST_WATER")
         return Prediction("안녕하세요", 0.8)

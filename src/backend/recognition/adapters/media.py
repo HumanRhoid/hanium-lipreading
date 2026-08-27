@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 import cv2
 import numpy as np
 
-from src.backend.recognition.domain import INPUT_FRAME_HEIGHT, INPUT_FRAME_WIDTH
+from src.backend.recognition.domain import STREAM_FRAME_HEIGHT, STREAM_FRAME_WIDTH
 from src.backend.recognition.errors import FrameValidationBusyError, InvalidFrameError
 
 _START_OF_FRAME_MARKERS = frozenset(
@@ -34,8 +34,8 @@ class JpegFrameValidator:
     def __init__(
         self,
         *,
-        width: int = INPUT_FRAME_WIDTH,
-        height: int = INPUT_FRAME_HEIGHT,
+        width: int = STREAM_FRAME_WIDTH,
+        height: int = STREAM_FRAME_HEIGHT,
     ):
         self._width = width
         self._height = height

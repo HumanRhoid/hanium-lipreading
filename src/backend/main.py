@@ -27,8 +27,8 @@ from src.backend.recognition.adapters.repository import (
 )
 from src.backend.recognition.api import router as recognition_router
 from src.backend.recognition.domain import (
-    INPUT_FRAME_HEIGHT,
-    INPUT_FRAME_WIDTH,
+    STREAM_FRAME_HEIGHT,
+    STREAM_FRAME_WIDTH,
 )
 from src.backend.recognition.job_status_api import (
     router as inference_job_status_router,
@@ -279,8 +279,8 @@ def create_app(
                 frame_validator
                 if frame_validator is not None
                 else JpegFrameValidator(
-                    width=(INPUT_FRAME_WIDTH),
-                    height=(INPUT_FRAME_HEIGHT),
+                    width=(STREAM_FRAME_WIDTH),
+                    height=(STREAM_FRAME_HEIGHT),
                 )
             )
 

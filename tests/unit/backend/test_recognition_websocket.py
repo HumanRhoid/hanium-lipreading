@@ -327,7 +327,7 @@ async def test_start_frames_single_final_stop_happy_path() -> None:
             await client.send_json({"type": "start"})
             assert await client.receive_json() == {"type": "ready"}
 
-            frames = tuple(f"frame-{index}".encode() for index in range(30))
+            frames = tuple(f"frame-{index}".encode() for index in range(60))
             for frame in frames:
                 await client.send_bytes(frame)
 
@@ -586,7 +586,7 @@ async def test_invalid_jpeg_is_rejected_and_session_is_ended() -> None:
     assert repository.ended == [1]
 
 
-async def test_stop_below_thirty_frames_reports_insufficient_frames() -> None:
+async def test_stop_below_sixty_frames_reports_insufficient_frames() -> None:
     repository = FakeRepository()
     app, _ = build_app(repository=repository)
 
@@ -632,7 +632,7 @@ async def test_inference_capacity_error_closes_session_as_server_busy() -> None:
         async with connected_client(app) as client:
             await client.send_json({"type": "start", "mode": "CLOSED"})
             assert await client.receive_json() == {"type": "ready"}
-            for _ in range(30):
+            for _ in range(60):
                 await client.send_bytes(b"frame")
             await client.send_json({"type": "stop"})
             await assert_error_and_close(client, code="SERVER_BUSY", close_code=1013)
@@ -666,7 +666,7 @@ async def test_internal_error_log_does_not_contain_recognition_text(caplog) -> N
         async with connected_client(app) as client:
             await client.send_json({"type": "start", "mode": "OPEN"})
             assert await client.receive_json() == {"type": "ready"}
-            for _ in range(30):
+            for _ in range(60):
                 await client.send_bytes(b"frame")
             await client.send_json({"type": "stop"})
             await assert_error_and_close(
@@ -748,7 +748,7 @@ async def test_blocked_stopped_event_is_bounded_and_close_is_still_attempted() -
             await client.connect()
             await client.send_json({"type": "start", "mode": "OPEN"})
             assert await client.receive_json() == {"type": "ready"}
-            for _ in range(30):
+            for _ in range(60):
                 await client.send_bytes(b"frame")
 
             await client.send_json({"type": "stop"})
@@ -804,10 +804,10 @@ async def test_frames_are_buffered_until_stop_then_normalized_once() -> None:
         async with connected_client(app) as client:
             await client.send_json({"type": "start", "mode": "OPEN"})
             assert await client.receive_json() == {"type": "ready"}
-            frames = tuple(f"frame-{index}".encode() for index in range(40))
+            frames = tuple(f"frame-{index}".encode() for index in range(80))
             for frame in frames:
                 await client.send_bytes(frame)
-            await wait_until(lambda: len(validator.frames) == 40)
+            await wait_until(lambda: len(validator.frames) == 80)
 
             assert gateway.first_started.is_set() is False
             with pytest.raises(TimeoutError):
@@ -821,7 +821,7 @@ async def test_frames_are_buffered_until_stop_then_normalized_once() -> None:
             assert await client.receive_json() == {"type": "stopped"}
             await client.receive_close(1000)
 
-    expected_indices = tuple(index * 39 // 29 for index in range(30))
+    expected_indices = tuple(index * 79 // 59 for index in range(60))
     assert gateway.calls == [
         (tuple(frames[index] for index in expected_indices), RecognitionMode.OPEN)
     ]
@@ -840,7 +840,7 @@ async def test_disconnect_after_stop_keeps_terminal_work_and_session_slot() -> N
             await first.connect()
             await first.send_json({"type": "start", "mode": "OPEN"})
             assert await first.receive_json() == {"type": "ready"}
-            for _ in range(30):
+            for _ in range(60):
                 await first.send_bytes(b"frame")
             await first.send_json({"type": "stop"})
             await asyncio.wait_for(gateway.first_started.wait(), timeout=1)

@@ -12,9 +12,9 @@ from src.backend.recognition.adapters.inference import (
     UnavailableRecognitionGateway,
 )
 from src.backend.recognition.domain import (
-    INPUT_FRAME_COUNT,
-    INPUT_FRAME_HEIGHT,
-    INPUT_FRAME_WIDTH,
+    MODEL_INPUT_FRAME_COUNT,
+    STREAM_FRAME_HEIGHT,
+    STREAM_FRAME_WIDTH,
     ModelManifest,
     Prediction,
     RecognitionMode,
@@ -32,10 +32,10 @@ class BlockingPredictor:
         self.manifest = ModelManifest(
             bundle_version="blocking-v1",
             supported_modes={RecognitionMode.CLOSED, RecognitionMode.OPEN},
-            frame_width=INPUT_FRAME_WIDTH,
-            frame_height=INPUT_FRAME_HEIGHT,
+            frame_width=STREAM_FRAME_WIDTH,
+            frame_height=STREAM_FRAME_HEIGHT,
             fps=25,
-            input_frame_count=INPUT_FRAME_COUNT,
+            input_frame_count=MODEL_INPUT_FRAME_COUNT,
         )
 
     def start(self):
@@ -214,7 +214,7 @@ def test_fake_predictor_supports_both_api_modes(mode, expected_text, expected_co
     predictor = FakeSyncPredictor()
     predictor.start()
 
-    prediction = predictor.predict((b"jpeg",) * INPUT_FRAME_COUNT, mode)
+    prediction = predictor.predict((b"jpeg",) * MODEL_INPUT_FRAME_COUNT, mode)
 
     assert prediction.text == expected_text
     assert prediction.phrase_code == expected_code
@@ -223,16 +223,16 @@ def test_fake_predictor_supports_both_api_modes(mode, expected_text, expected_co
 def test_fake_predictor_manifest_matches_public_input_contract():
     manifest = FakeSyncPredictor().manifest
 
-    assert manifest.frame_width == INPUT_FRAME_WIDTH
-    assert manifest.frame_height == INPUT_FRAME_HEIGHT
+    assert manifest.frame_width == STREAM_FRAME_WIDTH
+    assert manifest.frame_height == STREAM_FRAME_HEIGHT
     assert manifest.fps == 25
-    assert manifest.input_frame_count == INPUT_FRAME_COUNT
+    assert manifest.input_frame_count == MODEL_INPUT_FRAME_COUNT
     assert manifest.supported_modes == frozenset(RecognitionMode)
 
 
-def test_fake_predictor_rejects_input_that_was_not_normalized_to_thirty_frames():
+def test_fake_predictor_rejects_input_that_was_not_normalized_to_sixty_frames():
     predictor = FakeSyncPredictor()
     predictor.start()
 
-    with pytest.raises(ValueError, match="정확히 30프레임"):
-        predictor.predict((b"jpeg",) * 29, RecognitionMode.CLOSED)
+    with pytest.raises(ValueError, match="정확히 60프레임"):
+        predictor.predict((b"jpeg",) * 59, RecognitionMode.CLOSED)

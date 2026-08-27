@@ -5,13 +5,21 @@ from dataclasses import dataclass
 from enum import Enum
 from numbers import Real
 
-# v1 WebSocket과 모델 adapter 사이의 고정된 입력 계약이다.
-INPUT_FRAME_WIDTH = 640
-INPUT_FRAME_HEIGHT = 360
+# ── 뷰 → 서버 전송 규격 ──────────────────────────────────────────
+# v1 WebSocket 스트리밍 경로가 받는 프레임의 계약이다. 모델 입력 규격이 아니다.
+# 이 둘을 한 이름(INPUT_FRAME_*)으로 섞어 쓰다 Worker가 크롭 결과(60·96·192)를
+# 전송 규격(30·360·640)으로 검증하는 사고가 났다. 이름으로 의미를 가른다.
+STREAM_FRAME_WIDTH = 640
+STREAM_FRAME_HEIGHT = 360
+STREAM_FRAME_FPS = 25
 MAX_FRAME_BYTES = 512 * 1024
-INPUT_FRAME_FPS = 25
-INPUT_FRAME_COUNT = 30
-MIN_VIDEO_FRAMES = INPUT_FRAME_COUNT
+
+# ── 모델 입력 프레임 수 ──────────────────────────────────────────
+# 원천은 src/ml/preprocess/normalize.py의 FIXED_FRAME_COUNT(60)다. ml 모듈은
+# import 시 cv2를 끌고 오므로 여기에는 값만 복제한다. 어긋나면
+# tests/unit/backend/test_domain_models.py의 동기화 테스트가 잡는다.
+MODEL_INPUT_FRAME_COUNT = 60
+MIN_VIDEO_FRAMES = MODEL_INPUT_FRAME_COUNT
 MAX_VIDEO_FRAMES = 250
 MAX_VIDEO_BYTES = 64 * 1024 * 1024
 
