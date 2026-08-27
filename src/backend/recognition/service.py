@@ -5,10 +5,10 @@ import logging
 from enum import Enum
 
 from src.backend.recognition.domain import (
-    INPUT_FRAME_COUNT,
-    INPUT_FRAME_FPS,
-    INPUT_FRAME_HEIGHT,
-    INPUT_FRAME_WIDTH,
+    MODEL_INPUT_FRAME_COUNT,
+    STREAM_FRAME_FPS,
+    STREAM_FRAME_HEIGHT,
+    STREAM_FRAME_WIDTH,
     ModelManifest,
     RecognitionMode,
     RecognitionOutput,
@@ -95,10 +95,10 @@ class RecognitionService:
         if self._manifest is None:
             return
         expected_values = {
-            "frame_width": INPUT_FRAME_WIDTH,
-            "frame_height": INPUT_FRAME_HEIGHT,
-            "fps": INPUT_FRAME_FPS,
-            "input_frame_count": INPUT_FRAME_COUNT,
+            "frame_width": STREAM_FRAME_WIDTH,
+            "frame_height": STREAM_FRAME_HEIGHT,
+            "fps": STREAM_FRAME_FPS,
+            "input_frame_count": MODEL_INPUT_FRAME_COUNT,
             "input_codec": "image/jpeg",
         }
         mismatches = [

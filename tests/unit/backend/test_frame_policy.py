@@ -3,7 +3,7 @@
 import pytest
 
 from src.backend.recognition.domain import (
-    INPUT_FRAME_COUNT,
+    MODEL_INPUT_FRAME_COUNT,
     MAX_VIDEO_BYTES,
     MAX_VIDEO_FRAMES,
     MIN_VIDEO_FRAMES,
@@ -21,18 +21,18 @@ from src.backend.recognition.frame_policy import (
 
 
 def test_v1_video_limits_are_fixed_contract_values():
-    assert INPUT_FRAME_COUNT == 30
-    assert MIN_VIDEO_FRAMES == 30
+    assert MODEL_INPUT_FRAME_COUNT == 60
+    assert MIN_VIDEO_FRAMES == 60
     assert MAX_VIDEO_FRAMES == 250
     assert MAX_VIDEO_BYTES == 64 * 1024 * 1024
 
 
-@pytest.mark.parametrize("frame_count", [30, 31, 250])
+@pytest.mark.parametrize("frame_count", [60, 61, 250])
 def test_uniform_indices_follow_the_documented_floor_formula(frame_count):
     indices = uniform_frame_indices(frame_count)
 
-    assert indices == tuple(index * (frame_count - 1) // 29 for index in range(30))
-    assert len(indices) == INPUT_FRAME_COUNT
+    assert indices == tuple(index * (frame_count - 1) // 59 for index in range(60))
+    assert len(indices) == MODEL_INPUT_FRAME_COUNT
     assert indices[0] == 0
     assert indices[-1] == frame_count - 1
     assert all(left < right for left, right in zip(indices, indices[1:]))
@@ -43,12 +43,12 @@ def test_normalization_selects_frames_from_the_full_video():
 
     normalized = normalize_video_frames(frames)
 
-    expected_indices = tuple(index * 249 // 29 for index in range(30))
+    expected_indices = tuple(index * 249 // 59 for index in range(60))
     assert normalized == tuple(frames[index] for index in expected_indices)
 
 
-def test_exactly_thirty_frames_are_kept_without_reordering():
-    frames = tuple(f"frame-{index}".encode() for index in range(30))
+def test_exactly_sixty_frames_are_kept_without_reordering():
+    frames = tuple(f"frame-{index}".encode() for index in range(60))
 
     assert normalize_video_frames(frames) == frames
 

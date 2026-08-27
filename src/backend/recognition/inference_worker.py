@@ -11,11 +11,12 @@ from typing import Protocol
 import cv2
 import numpy as np
 
-from src.backend.recognition.domain import (
-    INPUT_FRAME_COUNT,
-    INPUT_FRAME_HEIGHT,
-    INPUT_FRAME_WIDTH,
+from src.ml.preprocess.normalize import (
+    FIXED_FRAME_COUNT,
+    TARGET_HEIGHT,
+    TARGET_WIDTH,
 )
+
 from src.backend.recognition.ports import (
     InferenceJobRecord,
     InferenceJobWorkerQueue,
@@ -128,7 +129,7 @@ class MlStoredVideoPreprocessor:
                 normalized = self._processor(
                     temporary_path,
                     landmarker,
-                    INPUT_FRAME_COUNT,
+                    FIXED_FRAME_COUNT,
                 )
             finally:
                 close = getattr(
@@ -143,10 +144,11 @@ class MlStoredVideoPreprocessor:
             if normalized is None:
                 raise RuntimeError("업로드 영상에서 입술 ROI를 추출할 수 없습니다.")
 
+            # 전처리 결과는 모델 입력 규격(크롭)이지 전송 규격이 아니다.
             expected_shape = (
-                INPUT_FRAME_COUNT,
-                INPUT_FRAME_HEIGHT,
-                INPUT_FRAME_WIDTH,
+                FIXED_FRAME_COUNT,
+                TARGET_HEIGHT,
+                TARGET_WIDTH,
                 3,
             )
 

@@ -3,7 +3,7 @@
 from collections.abc import Sequence
 
 from src.backend.recognition.domain import (
-    INPUT_FRAME_COUNT,
+    MODEL_INPUT_FRAME_COUNT,
     MAX_VIDEO_BYTES,
     MAX_VIDEO_FRAMES,
     MIN_VIDEO_FRAMES,
@@ -33,7 +33,7 @@ def validate_video_limits(*, frame_count: int, total_bytes: int) -> None:
 def uniform_frame_indices(
     frame_count: int,
     *,
-    output_count: int = INPUT_FRAME_COUNT,
+    output_count: int = MODEL_INPUT_FRAME_COUNT,
 ) -> tuple[int, ...]:
     """처음과 마지막을 포함해 전체 구간의 index를 균등하게 고른다."""
 

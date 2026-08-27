@@ -6,9 +6,9 @@ from dataclasses import replace
 import pytest
 
 from src.backend.recognition.domain import (
-    INPUT_FRAME_COUNT,
-    INPUT_FRAME_HEIGHT,
-    INPUT_FRAME_WIDTH,
+    MODEL_INPUT_FRAME_COUNT,
+    STREAM_FRAME_HEIGHT,
+    STREAM_FRAME_WIDTH,
     ModelManifest,
     Prediction,
     RecognitionMode,
@@ -62,10 +62,10 @@ def valid_manifest(**overrides):
     manifest = ModelManifest(
         bundle_version="fake-v1",
         supported_modes={RecognitionMode.CLOSED, RecognitionMode.OPEN},
-        frame_width=INPUT_FRAME_WIDTH,
-        frame_height=INPUT_FRAME_HEIGHT,
+        frame_width=STREAM_FRAME_WIDTH,
+        frame_height=STREAM_FRAME_HEIGHT,
         fps=25,
-        input_frame_count=INPUT_FRAME_COUNT,
+        input_frame_count=MODEL_INPUT_FRAME_COUNT,
         label_map_version="demo-v1",
     )
     return replace(manifest, **overrides)
@@ -112,10 +112,10 @@ async def test_service_delegates_session_lifecycle_to_repository():
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("frame_width", INPUT_FRAME_WIDTH + 1),
-        ("frame_height", INPUT_FRAME_HEIGHT + 1),
+        ("frame_width", STREAM_FRAME_WIDTH + 1),
+        ("frame_height", STREAM_FRAME_HEIGHT + 1),
         ("fps", 24),
-        ("input_frame_count", INPUT_FRAME_COUNT - 1),
+        ("input_frame_count", MODEL_INPUT_FRAME_COUNT - 1),
         ("input_codec", "video/mp4"),
     ],
 )

@@ -5,8 +5,8 @@ import math
 import pytest
 
 from src.backend.recognition.domain import (
-    INPUT_FRAME_HEIGHT,
-    INPUT_FRAME_WIDTH,
+    STREAM_FRAME_HEIGHT,
+    STREAM_FRAME_WIDTH,
     ModelManifest,
     Prediction,
     RecognitionMode,
@@ -57,8 +57,8 @@ def test_model_manifest_normalizes_supported_modes_to_immutable_set():
     manifest = ModelManifest(
         bundle_version="fake-v1",
         supported_modes={RecognitionMode.CLOSED, RecognitionMode.OPEN},
-        frame_width=INPUT_FRAME_WIDTH,
-        frame_height=INPUT_FRAME_HEIGHT,
+        frame_width=STREAM_FRAME_WIDTH,
+        frame_height=STREAM_FRAME_HEIGHT,
         fps=25,
         input_frame_count=30,
         label_map_version="demo-v1",
@@ -86,8 +86,8 @@ def test_model_manifest_rejects_invalid_contract_values(field, value):
     values = {
         "bundle_version": "fake-v1",
         "supported_modes": {RecognitionMode.CLOSED},
-        "frame_width": INPUT_FRAME_WIDTH,
-        "frame_height": INPUT_FRAME_HEIGHT,
+        "frame_width": STREAM_FRAME_WIDTH,
+        "frame_height": STREAM_FRAME_HEIGHT,
         "fps": 25,
         "input_frame_count": 30,
         "label_map_version": "demo-v1",
@@ -96,3 +96,16 @@ def test_model_manifest_rejects_invalid_contract_values(field, value):
 
     with pytest.raises(ValueError):
         ModelManifest(**values)
+
+
+def test_model_input_frame_count_matches_ml_source():
+    """domain의 모델 프레임 수 복제값이 원천(normalize)과 같아야 한다.
+
+    ml 모듈은 import 시 cv2를 끌고 오므로 domain이 직접 import하지 않고
+    값을 복제한다. 이 테스트가 그 복제의 동기화를 강제한다.
+    """
+    from src.ml.preprocess.normalize import FIXED_FRAME_COUNT
+
+    from src.backend.recognition.domain import MODEL_INPUT_FRAME_COUNT
+
+    assert MODEL_INPUT_FRAME_COUNT == FIXED_FRAME_COUNT

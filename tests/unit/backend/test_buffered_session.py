@@ -155,9 +155,9 @@ async def test_frames_are_only_buffered_until_stop_then_processed_once():
     corrector = RecordingCorrector()
     service, _ = make_service(repository, gateway, corrector=corrector)
     session = await service.open_session(RecognitionMode.CLOSED)
-    frames = await push_frames(session, 40)
+    frames = await push_frames(session, 80)
 
-    assert session.buffered_frame_count == 40
+    assert session.buffered_frame_count == 80
     assert session.buffered_bytes == sum(map(len, frames))
     assert gateway.calls == []
     assert corrector.calls == []
@@ -165,7 +165,7 @@ async def test_frames_are_only_buffered_until_stop_then_processed_once():
 
     output = await session.stop()
 
-    expected_indices = tuple(index * 39 // 29 for index in range(30))
+    expected_indices = tuple(index * 79 // 59 for index in range(60))
     assert gateway.calls == [
         (tuple(frames[index] for index in expected_indices), RecognitionMode.CLOSED)
     ]
@@ -182,7 +182,7 @@ async def test_repeated_and_concurrent_stop_share_one_terminal_task():
     corrector = RecordingCorrector()
     service, _ = make_service(repository, gateway, corrector=corrector)
     session = await service.open_session(RecognitionMode.OPEN)
-    await push_frames(session, 30)
+    await push_frames(session, 60)
 
     first = asyncio.create_task(session.stop())
     second = asyncio.create_task(session.stop())
@@ -258,7 +258,7 @@ async def test_disconnect_before_stop_discards_without_inference_or_utterance():
     corrector = RecordingCorrector()
     service, _ = make_service(repository, gateway, corrector=corrector)
     session = await service.open_session(RecognitionMode.CLOSED)
-    await push_frames(session, 30)
+    await push_frames(session, 60)
 
     await session.disconnect()
 
@@ -277,7 +277,7 @@ async def test_cancelled_stop_keeps_capacity_until_terminal_work_finishes():
     gateway = BlockingGateway()
     service, _ = make_service(repository, gateway)
     session = await service.open_session(RecognitionMode.CLOSED)
-    await push_frames(session, 30)
+    await push_frames(session, 60)
 
     stopping = asyncio.create_task(session.stop())
     await gateway.called.wait()
@@ -303,7 +303,7 @@ async def test_disconnect_after_stop_waits_for_the_same_terminal_task():
     gateway = BlockingGateway()
     service, _ = make_service(repository, gateway)
     session = await service.open_session(RecognitionMode.CLOSED)
-    await push_frames(session, 30)
+    await push_frames(session, 60)
 
     stopping = asyncio.create_task(session.stop())
     await gateway.called.wait()
@@ -325,7 +325,7 @@ async def test_inference_failure_ends_session_clears_buffer_and_releases_capacit
     gateway = FailingGateway()
     service, _ = make_service(repository, gateway)
     session = await service.open_session(RecognitionMode.CLOSED)
-    await push_frames(session, 30)
+    await push_frames(session, 60)
 
     with pytest.raises(RuntimeError, match="predict failed"):
         await session.stop()
@@ -345,7 +345,7 @@ async def test_frames_are_rejected_after_terminal_processing_starts():
     gateway = BlockingGateway()
     service, _ = make_service(repository, gateway)
     session = await service.open_session(RecognitionMode.CLOSED)
-    await push_frames(session, 30)
+    await push_frames(session, 60)
     stopping = asyncio.create_task(session.stop())
     await gateway.called.wait()
 
