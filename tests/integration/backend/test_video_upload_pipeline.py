@@ -23,6 +23,8 @@ from src.backend.recognition.adapters.repository import (
     Utterance,
     VideoAsset,
 )
+from src.backend.recognition.job_status_api import router as job_status_router
+from src.backend.recognition.job_status_service import InferenceJobStatusService
 from src.backend.recognition.submission_service import (
     RecognitionSubmissionService,
 )
@@ -200,6 +202,27 @@ async def _post_video(
         )
 
 
+async def _get_job_status(
+    app: FastAPI,
+    *,
+    job_id: str,
+):
+    """실제 추론 Job 상태 조회 HTTP endpoint를 호출한다."""
+
+    transport = ASGITransport(app=app)
+
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+    ) as client:
+        return await client.get(
+            f"/api/v1/inference-jobs/{job_id}",
+            headers={
+                "X-Session-Token": SESSION_TOKEN,
+            },
+        )
+
+
 async def test_http_upload_persists_and_enqueues_across_real_dependencies(
     postgres_url,
     postgres_session_factory,
@@ -223,6 +246,11 @@ async def test_http_upload_persists_and_enqueues_across_real_dependencies(
         inference_job_queue=job_queue,
     )
 
+    job_status_service = InferenceJobStatusService(
+        repository=repository,
+        inference_job_queue=job_queue,
+    )
+
     (
         user_id,
         storage_uuid,
@@ -236,10 +264,12 @@ async def test_http_upload_persists_and_enqueues_across_real_dependencies(
     app = FastAPI()
 
     app.include_router(upload_router)
+    app.include_router(job_status_router)
 
     app.state.settings = settings
     app.state.auth_service = auth_service
     app.state.submission_service = submission_service
+    app.state.inference_job_status_service = job_status_service
 
     redis_client = Redis.from_url(
         settings.redis_url,
@@ -355,6 +385,42 @@ async def test_http_upload_persists_and_enqueues_across_real_dependencies(
         assert stream_payload["object_key"] == uploaded_object_key
 
         assert stream_payload["mode"] == "CLOSED"
+
+        status_response = await _get_job_status(
+            app,
+            job_id=job_id,
+        )
+
+        assert status_response.status_code == 200
+
+        assert status_response.json() == {
+            "job_id": job_id,
+            "utterance_id": found_asset.utterance_id,
+            "video_id": found_asset.video_id,
+            "status": "QUEUED",
+            "error_code": None,
+        }
+
+        (
+            other_user_id,
+            other_storage_uuid,
+        ) = await _create_test_user(postgres_session_factory)
+
+        app.state.auth_service = FakeAuthService(
+            user_id=other_user_id,
+            storage_uuid=other_storage_uuid,
+        )
+
+        unowned_response = await _get_job_status(
+            app,
+            job_id=job_id,
+        )
+
+        assert unowned_response.status_code == 404
+
+        assert unowned_response.json() == {"detail": "추론 Job을 찾을 수 없습니다."}
+
+        app.state.auth_service = auth_service
 
         second_response = await _post_video(
             app,

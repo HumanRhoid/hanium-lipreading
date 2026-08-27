@@ -30,6 +30,12 @@ from src.backend.recognition.domain import (
     INPUT_FRAME_HEIGHT,
     INPUT_FRAME_WIDTH,
 )
+from src.backend.recognition.job_status_api import (
+    router as inference_job_status_router,
+)
+from src.backend.recognition.job_status_service import (
+    InferenceJobStatusService,
+)
 from src.backend.recognition.ports import (
     FrameValidator,
     InferenceJobQueue,
@@ -197,6 +203,7 @@ def create_app(
     video_upload_service: VideoUploadService | None = None,
     inference_job_queue: InferenceJobQueue | None = None,
     submission_service: RecognitionSubmissionService | None = None,
+    job_status_service: InferenceJobStatusService | None = None,
 ) -> FastAPI:
     """운영 구현과 테스트 대역을 주입할 수 있는 애플리케이션을 생성한다."""
 
@@ -295,6 +302,15 @@ def create_app(
                 )
             )
 
+            app_job_status_service = (
+                job_status_service
+                if job_status_service is not None
+                else InferenceJobStatusService(
+                    repository=app_repository,
+                    inference_job_queue=app_inference_job_queue,
+                )
+            )
+
             app.state.settings = app_settings
 
             app.state.database = app_database
@@ -319,6 +335,8 @@ def create_app(
             app.state.inference_job_queue = app_inference_job_queue
 
             app.state.submission_service = app_submission_service
+
+            app.state.inference_job_status_service = app_job_status_service
 
             app.state.auth_repository = app_auth_repository
 
@@ -381,6 +399,8 @@ def create_app(
     app.include_router(recognition_router)
 
     app.include_router(recognition_upload_router)
+
+    app.include_router(inference_job_status_router)
 
     return app
 

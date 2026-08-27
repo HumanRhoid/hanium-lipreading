@@ -448,6 +448,49 @@ async def test_find_video_asset_by_idempotency_key(
     assert found.checksum == "b" * 64
 
 
+async def test_find_video_asset_by_id(
+    postgres_session_factory,
+):
+    repository = SQLAlchemyRecognitionRepository(postgres_session_factory)
+
+    user_id = await _create_user(postgres_session_factory)
+
+    created = await repository.create_or_get_video_asset(
+        user_id=user_id,
+        idempotency_key="55555555-5555-4555-8555-555555555555",
+        object_key="storage-user/2026/08/find-by-id.webm",
+        original_mime_type="video/webm",
+        size_bytes=67890,
+        checksum="1" * 64,
+        storage_purpose="TEMPORARY_INFERENCE",
+        consent_version=None,
+        retention_until=None,
+    )
+
+    found = await repository.find_video_asset_by_id(
+        video_id=created.asset.video_id,
+    )
+
+    assert found is not None
+    assert found.video_id == created.asset.video_id
+    assert found.utterance_id == created.asset.utterance_id
+    assert found.user_id == user_id
+    assert found.object_key == "storage-user/2026/08/find-by-id.webm"
+    assert found.checksum == "1" * 64
+
+
+async def test_find_video_asset_by_id_returns_none_for_unknown_video(
+    postgres_session_factory,
+):
+    repository = SQLAlchemyRecognitionRepository(postgres_session_factory)
+
+    found = await repository.find_video_asset_by_id(
+        video_id=2_147_483_647,
+    )
+
+    assert found is None
+
+
 async def test_duplicate_idempotency_key_returns_existing_video_asset(
     postgres_session_factory,
 ):

@@ -83,7 +83,15 @@ class RecognitionRepository(Protocol):
 
 
 class VideoUploadRepository(Protocol):
-    """비동기 영상 업로드 메타데이터를 저장하는 포트."""
+    """비동기 영상 업로드 메타데이터를 저장하고 조회하는 포트."""
+
+    async def find_video_asset_by_id(
+        self,
+        *,
+        video_id: int,
+    ) -> VideoAssetRecord | None:
+        """video_id로 영상 메타데이터를 조회한다."""
+        ...
 
     async def find_video_asset_by_idempotency_key(
         self,

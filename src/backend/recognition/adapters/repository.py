@@ -576,6 +576,24 @@ class SQLAlchemyRecognitionRepository:
                 .values(ended_at=func.now())
             )
 
+    async def find_video_asset_by_id(
+        self,
+        *,
+        video_id: int,
+    ) -> VideoAssetRecord | None:
+        """video_id로 영상 메타데이터를 조회한다."""
+
+        async with self._session_factory() as db_session:
+            asset = await db_session.get(
+                VideoAsset,
+                video_id,
+            )
+
+            if asset is None:
+                return None
+
+            return _to_video_asset_record(asset)
+
     async def find_video_asset_by_idempotency_key(
         self,
         *,
