@@ -7,6 +7,7 @@ requires-python = ">=3.11,<3.12"
 dependencies = [
     "alembic",
     "asyncpg",
+    "boto3",
     "fastapi",
     "numpy",
     "pandas",
@@ -41,7 +42,7 @@ addopts = [
 ]
 asyncio_mode = "auto"
 markers = [
-    "integration: 실제 PostgreSQL 등 외부 런타임이 필요한 통합 테스트",
+    "integration: 실제 PostgreSQL 등의 외부 의존성이 필요한 통합 테스트",
     "gpu: 실제 CUDA 또는 ROCm GPU가 필요한 테스트",
 ]
 pythonpath = ["."]
