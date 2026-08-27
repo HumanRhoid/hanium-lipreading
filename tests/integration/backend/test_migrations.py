@@ -15,7 +15,17 @@ from alembic import command
 pytestmark = pytest.mark.integration
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-MANAGED_TABLES = {"session", "phrase", "utterance", "users", "login_session"}
+
+MANAGED_TABLES = {
+    "session",
+    "phrase",
+    "utterance",
+    "users",
+    "login_session",
+    "video_asset",
+    "user_consent",
+    "phrase_usage_stat",
+}
 
 
 def _alembic_config() -> Config:
@@ -28,14 +38,23 @@ async def _drop_managed_tables(database_url: str) -> None:
     """테스트 DB에서 이 서비스가 소유한 테이블만 명시적으로 제거한다."""
 
     engine = create_async_engine(database_url)
+
     try:
         async with engine.begin() as connection:
             actual_database = await connection.scalar(text("SELECT current_database()"))
+
             if actual_database != make_url(database_url).database:
-                raise RuntimeError("연결된 DB가 TEST_DATABASE_URL과 다릅니다")
+                raise RuntimeError("연결된 DB가 TEST_DATABASE_URL과 다릅니다.")
+
+            # FK 의존성이 있는 테이블부터 제거한다.
+            await connection.execute(
+                text("DROP TABLE IF EXISTS phrase_usage_stat CASCADE")
+            )
+            await connection.execute(text("DROP TABLE IF EXISTS user_consent CASCADE"))
+            await connection.execute(text("DROP TABLE IF EXISTS video_asset CASCADE"))
             await connection.execute(text("DROP TABLE IF EXISTS login_session CASCADE"))
-            await connection.execute(text("DROP TABLE IF EXISTS users CASCADE"))
             await connection.execute(text("DROP TABLE IF EXISTS utterance CASCADE"))
+            await connection.execute(text("DROP TABLE IF EXISTS users CASCADE"))
             await connection.execute(text("DROP TABLE IF EXISTS phrase CASCADE"))
             await connection.execute(text('DROP TABLE IF EXISTS "session" CASCADE'))
             await connection.execute(text("DROP TABLE IF EXISTS alembic_version"))
@@ -43,15 +62,19 @@ async def _drop_managed_tables(database_url: str) -> None:
         await engine.dispose()
 
 
-async def _schema_snapshot(database_url: str) -> dict[str, object]:
-    """동기 Inspector 결과를 event loop 밖에서도 비교 가능한 값으로 반환한다."""
+async def _schema_snapshot(
+    database_url: str,
+) -> dict[str, object]:
+    """동기 Inspector 결과를 비교 가능한 값으로 반환한다."""
 
     engine = create_async_engine(database_url)
+
     try:
         async with engine.connect() as connection:
 
             def inspect_schema(sync_connection):
                 inspector = inspect(sync_connection)
+
                 return {
                     "tables": set(inspector.get_table_names()),
                     "session_checks": {
@@ -66,17 +89,40 @@ async def _schema_snapshot(database_url: str) -> dict[str, object]:
                         constraint["name"]
                         for constraint in inspector.get_check_constraints("utterance")
                     },
+                    "video_asset_checks": {
+                        constraint["name"]
+                        for constraint in inspector.get_check_constraints("video_asset")
+                    },
+                    "phrase_usage_stat_checks": {
+                        constraint["name"]
+                        for constraint in inspector.get_check_constraints(
+                            "phrase_usage_stat"
+                        )
+                    },
                     "phrase_uniques": {
                         constraint["name"]
                         for constraint in inspector.get_unique_constraints("phrase")
                     },
+                    "video_asset_uniques": {
+                        constraint["name"]
+                        for constraint in inspector.get_unique_constraints(
+                            "video_asset"
+                        )
+                    },
                     "session_indexes": {
                         index["name"]: tuple(index["column_names"])
                         for index in inspector.get_indexes("session")
+                        if not index.get("duplicates_constraint")
                     },
                     "utterance_indexes": {
                         index["name"]: tuple(index["column_names"])
                         for index in inspector.get_indexes("utterance")
+                        if not index.get("duplicates_constraint")
+                    },
+                    "video_asset_indexes": {
+                        index["name"]: tuple(index["column_names"])
+                        for index in inspector.get_indexes("video_asset")
+                        if not index.get("duplicates_constraint")
                     },
                     "utterance_foreign_keys": {
                         constraint["name"]: (
@@ -85,6 +131,33 @@ async def _schema_snapshot(database_url: str) -> dict[str, object]:
                         )
                         for constraint in inspector.get_foreign_keys("utterance")
                     },
+                    "video_asset_foreign_keys": {
+                        constraint["name"]: (
+                            constraint["referred_table"],
+                            constraint["options"].get("ondelete"),
+                        )
+                        for constraint in inspector.get_foreign_keys("video_asset")
+                    },
+                    "user_consent_foreign_keys": {
+                        constraint["name"]: (
+                            constraint["referred_table"],
+                            constraint["options"].get("ondelete"),
+                        )
+                        for constraint in inspector.get_foreign_keys("user_consent")
+                    },
+                    "phrase_usage_stat_foreign_keys": {
+                        constraint["name"]: (
+                            constraint["referred_table"],
+                            constraint["options"].get("ondelete"),
+                        )
+                        for constraint in inspector.get_foreign_keys(
+                            "phrase_usage_stat"
+                        )
+                    },
+                    "utterance_nullable": {
+                        column["name"]: column["nullable"]
+                        for column in inspector.get_columns("utterance")
+                    },
                 }
 
             return await connection.run_sync(inspect_schema)
@@ -92,10 +165,13 @@ async def _schema_snapshot(database_url: str) -> dict[str, object]:
         await engine.dispose()
 
 
-async def _table_names(database_url: str) -> set[str]:
+async def _table_names(
+    database_url: str,
+) -> set[str]:
     """현재 PostgreSQL schema의 테이블 이름을 조회한다."""
 
     engine = create_async_engine(database_url)
+
     try:
         async with engine.connect() as connection:
             return await connection.run_sync(
@@ -109,54 +185,159 @@ def test_empty_database_upgrade_downgrade_upgrade_and_metadata_parity(
     postgres_url,
     monkeypatch,
 ):
-    """빈 DB 왕복과 autogenerate 차이 없음까지 한 흐름으로 검증한다."""
+    """빈 DB 왕복과 metadata/migration 일치를 검증한다."""
 
-    # env.py가 Settings를 통해 URL을 읽으므로 반드시 전용 테스트 URL로 고정한다.
-    monkeypatch.setenv("DATABASE_URL", postgres_url)
+    # env.py가 Settings를 통해 URL을 읽으므로
+    # 테스트 전용 PostgreSQL URL로 고정한다.
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        postgres_url,
+    )
+
     alembic_config = _alembic_config()
+
     asyncio.run(_drop_managed_tables(postgres_url))
 
     try:
         assert MANAGED_TABLES.isdisjoint(asyncio.run(_table_names(postgres_url)))
 
-        command.upgrade(alembic_config, "head")
+        command.upgrade(
+            alembic_config,
+            "head",
+        )
+
         first_upgrade = asyncio.run(_schema_snapshot(postgres_url))
+
         assert MANAGED_TABLES <= first_upgrade["tables"]
 
-        command.downgrade(alembic_config, "base")
+        command.downgrade(
+            alembic_config,
+            "base",
+        )
+
         assert MANAGED_TABLES.isdisjoint(asyncio.run(_table_names(postgres_url)))
 
-        command.upgrade(alembic_config, "head")
+        command.upgrade(
+            alembic_config,
+            "head",
+        )
+
         second_upgrade = asyncio.run(_schema_snapshot(postgres_url))
 
         assert second_upgrade == first_upgrade
+
         assert second_upgrade["session_checks"] == {
             "ck_session_ended_after_started",
             "ck_session_mode",
         }
+
         assert second_upgrade["phrase_checks"] == {
             "ck_phrase_category",
             "ck_phrase_text_not_blank",
         }
+
         assert second_upgrade["utterance_checks"] == {
             "ck_utterance_confidence_range",
             "ck_utterance_corrected_text_not_blank",
             "ck_utterance_raw_text_not_blank",
         }
+
+        assert second_upgrade["video_asset_checks"] == {
+            "ck_video_asset_storage_purpose",
+            "ck_video_asset_storage_status",
+        }
+
+        assert second_upgrade["phrase_usage_stat_checks"] == {
+            "ck_phrase_usage_stat_accepted_count_nonnegative",
+            "ck_phrase_usage_stat_corrected_count_nonnegative",
+            "ck_phrase_usage_stat_usage_count_nonnegative",
+        }
+
         assert second_upgrade["phrase_uniques"] == {"uq_phrase_phrase_code"}
+
+        assert second_upgrade["video_asset_uniques"] == {
+            "uq_video_asset_user_id_idempotency_key"
+        }
+
         assert second_upgrade["session_indexes"] == {
             "ix_session_started_at": ("started_at",)
         }
+
         assert second_upgrade["utterance_indexes"] == {
             "ix_utterance_phrase_id": ("phrase_id",),
-            "ix_utterance_session_created_at": ("session_id", "created_at"),
-        }
-        assert second_upgrade["utterance_foreign_keys"] == {
-            "fk_utterance_phrase_id_phrase": ("phrase", "SET NULL"),
-            "fk_utterance_session_id_session": ("session", "CASCADE"),
+            "ix_utterance_session_created_at": (
+                "session_id",
+                "created_at",
+            ),
+            "ix_utterance_user_created_at": (
+                "user_id",
+                "created_at",
+            ),
         }
 
-        # CI에서 `alembic check`와 같은 방식으로 migration/metadata drift를 잡는다.
+        assert second_upgrade["video_asset_indexes"] == {
+            "ix_video_asset_retention_until": ("retention_until",),
+            "ix_video_asset_user_created_at": (
+                "user_id",
+                "created_at",
+            ),
+        }
+
+        assert second_upgrade["utterance_foreign_keys"] == {
+            "fk_utterance_phrase_id_phrase": (
+                "phrase",
+                "SET NULL",
+            ),
+            "fk_utterance_session_id_session": (
+                "session",
+                "CASCADE",
+            ),
+            "fk_utterance_user_id_users": (
+                "users",
+                "CASCADE",
+            ),
+        }
+
+        assert second_upgrade["video_asset_foreign_keys"] == {
+            "fk_video_asset_user_id_users": (
+                "users",
+                "CASCADE",
+            ),
+            "fk_video_asset_utterance_id_utterance": (
+                "utterance",
+                "CASCADE",
+            ),
+        }
+
+        assert second_upgrade["user_consent_foreign_keys"] == {
+            "fk_user_consent_user_id_users": (
+                "users",
+                "CASCADE",
+            ),
+        }
+
+        assert second_upgrade["phrase_usage_stat_foreign_keys"] == {
+            "fk_phrase_usage_stat_phrase_code_phrase": (
+                "phrase",
+                "CASCADE",
+            ),
+            "fk_phrase_usage_stat_user_id_users": (
+                "users",
+                "CASCADE",
+            ),
+        }
+
+        # 비동기 영상 업로드에서는 추론 전에
+        # utterance를 생성할 수 있어야 한다.
+        utterance_nullable = second_upgrade["utterance_nullable"]
+
+        assert utterance_nullable["user_id"] is True
+        assert utterance_nullable["session_id"] is True
+        assert utterance_nullable["raw_text"] is True
+        assert utterance_nullable["model_version"] is True
+
+        # CI의 alembic check와 같은 방식으로
+        # migration과 SQLAlchemy metadata drift를 검증한다.
         command.check(alembic_config)
     finally:
         asyncio.run(_drop_managed_tables(postgres_url))
@@ -166,15 +347,21 @@ def test_alembic_command_does_not_disable_application_loggers(
     postgres_url,
     monkeypatch,
 ):
-    """프로세스 내 migration이 이후 개인정보 안전 로그를 무력화하지 않는다."""
+    """migration 실행 후에도 애플리케이션 logger를 비활성화하지 않는다."""
 
-    monkeypatch.setenv("DATABASE_URL", postgres_url)
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        postgres_url,
+    )
+
     application_logger = logging.getLogger("src.backend.recognition.api")
+
     original_disabled = application_logger.disabled
     application_logger.disabled = False
 
     try:
         command.current(_alembic_config())
+
         assert application_logger.disabled is False
     finally:
         application_logger.disabled = original_disabled

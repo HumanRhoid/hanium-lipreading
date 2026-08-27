@@ -5,6 +5,8 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import (
+    BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -17,6 +19,7 @@ from sqlalchemy import (
     delete,
     func,
     select,
+    text,
     update,
 )
 from sqlalchemy.dialects.postgresql import insert
@@ -31,35 +34,16 @@ from src.backend.recognition.domain import (
 )
 from src.backend.recognition.errors import SessionAlreadyEndedError
 
-# 테이블 정의와 repository 구현을 한 파일에 두는 이유:
-# - SQLAlchemy ORM은 당연히 테이블 정의와 repository 구현이 강하게 결합되어 있다
-
 
 class RecognitionSession(Base):
-    # 알케미에선 __tablename__과 __table_args__를 클래스 속성으로 정의해야
-    # 테이블 생성 시점에 제약조건과 인덱스가 적용된다
     __tablename__ = "session"
     __table_args__ = (
-        # DB 수준에서 Check 기능을 제공하여
-        # mode와 ended_at의 유효성을 보장한다
-        # 이름 자동 조합
-        # database.py
-        # "ck": "ck_%(table_name)s_%(constraint_name)s"
-        #    ↓
-        # name="mode" + table="session" → ck_session_mode
         CheckConstraint("mode IN ('CLOSED', 'OPEN')", name="mode"),
-        # -- 생성되는 SQL
-        # CONSTRAINT ck_session_mode CHECK (mode IN ('CLOSED','OPEN'))
-        #    ↑ 이 이름이 붙음
         CheckConstraint(
             "ended_at IS NULL OR ended_at >= started_at",
             name="ended_after_started",
         ),
-        # -- 생성되는 SQL
-        # CHECK (ended_at IS NULL OR ended_at >= started_at)
         Index("ix_session_started_at", "started_at"),
-        # -- 생성되는 SQL
-        # CREATE INDEX ix_session_started_at ON session (started_at);
     )
 
     session_id: Mapped[int] = mapped_column(Integer, Identity(), primary_key=True)
@@ -99,7 +83,10 @@ class Phrase(Base):
 class Utterance(Base):
     __tablename__ = "utterance"
     __table_args__ = (
-        CheckConstraint("raw_text ~ '[^[:space:]]'", name="raw_text_not_blank"),
+        CheckConstraint(
+            "raw_text IS NULL OR raw_text ~ '[^[:space:]]'",
+            name="raw_text_not_blank",
+        ),
         CheckConstraint(
             "corrected_text IS NULL OR corrected_text ~ '[^[:space:]]'",
             name="corrected_text_not_blank",
@@ -109,28 +96,170 @@ class Utterance(Base):
             name="confidence_range",
         ),
         Index("ix_utterance_session_created_at", "session_id", "created_at"),
+        Index("ix_utterance_user_created_at", "user_id", "created_at"),
         Index("ix_utterance_phrase_id", "phrase_id"),
     )
 
     utt_id: Mapped[int] = mapped_column(Integer, Identity(), primary_key=True)
-    session_id: Mapped[int] = mapped_column(
-        ForeignKey("session.session_id", ondelete="CASCADE"), nullable=False
+
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.user_id", ondelete="CASCADE"), nullable=True
     )
+
+    session_id: Mapped[int | None] = mapped_column(
+        ForeignKey("session.session_id", ondelete="CASCADE"), nullable=True
+    )
+
     phrase_id: Mapped[int | None] = mapped_column(
         ForeignKey("phrase.phrase_id", ondelete="SET NULL"), nullable=True
     )
-    raw_text: Mapped[str] = mapped_column(String(200), nullable=False)
+
+    raw_text: Mapped[str | None] = mapped_column(String(200), nullable=True)
     corrected_text: Mapped[str | None] = mapped_column(String(200), nullable=True)
     confidence: Mapped[Decimal | None] = mapped_column(Numeric(4, 3), nullable=True)
+    model_version: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
-    session: Mapped[RecognitionSession] = relationship(back_populates="utterances")
+
+    session: Mapped[RecognitionSession | None] = relationship(
+        back_populates="utterances"
+    )
     phrase: Mapped[Phrase | None] = relationship(back_populates="utterances")
 
 
+class VideoAsset(Base):
+    """Object Storage에 저장된 인식 영상의 메타데이터."""
+
+    __tablename__ = "video_asset"
+    __table_args__ = (
+        CheckConstraint(
+            (
+                "storage_status IN "
+                "('UPLOADED', 'NORMALIZING', 'READY', "
+                "'DELETE_PENDING', 'DELETED', 'FAILED')"
+            ),
+            name="storage_status",
+        ),
+        CheckConstraint(
+            "storage_purpose IN ('TEMPORARY_INFERENCE', 'MODEL_TRAINING')",
+            name="storage_purpose",
+        ),
+        UniqueConstraint(
+            "user_id",
+            "idempotency_key",
+            name="uq_video_asset_user_id_idempotency_key",
+        ),
+        Index("ix_video_asset_user_created_at", "user_id", "created_at"),
+        Index("ix_video_asset_retention_until", "retention_until"),
+    )
+
+    video_id: Mapped[int] = mapped_column(Integer, Identity(), primary_key=True)
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False
+    )
+
+    utterance_id: Mapped[int] = mapped_column(
+        ForeignKey("utterance.utt_id", ondelete="CASCADE"), nullable=False
+    )
+
+    idempotency_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    object_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    original_mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    normalized_mime_type: Mapped[str | None] = mapped_column(
+        String(100), nullable=True
+    )
+    codec: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    fps: Mapped[Decimal | None] = mapped_column(Numeric(7, 3), nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    checksum: Mapped[str] = mapped_column(String(128), nullable=False)
+    storage_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    storage_purpose: Mapped[str] = mapped_column(String(32), nullable=False)
+    consent_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    retention_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class UserConsent(Base):
+    """사용자의 모델 재학습용 영상 활용 동의 상태."""
+
+    __tablename__ = "user_consent"
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    model_training_consent: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
+    )
+    consent_version: Mapped[str] = mapped_column(String(50), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class PhraseUsageStat(Base):
+    """사용자별 문구 개인화 통계의 PostgreSQL 원본."""
+
+    __tablename__ = "phrase_usage_stat"
+    __table_args__ = (
+        CheckConstraint("usage_count >= 0", name="usage_count_nonnegative"),
+        CheckConstraint("accepted_count >= 0", name="accepted_count_nonnegative"),
+        CheckConstraint("corrected_count >= 0", name="corrected_count_nonnegative"),
+    )
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    phrase_code: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("phrase.phrase_code", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    usage_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+    )
+    accepted_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+    )
+    corrected_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class SQLAlchemyRecognitionRepository:
-    """WebSocket 수명과 분리된 단기 AsyncSession을 사용한다."""
+    """WebSocket 수명과 분리된 짧은 AsyncSession을 사용한다."""
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]):
         self._session_factory = session_factory
@@ -147,10 +276,12 @@ class SQLAlchemyRecognitionRepository:
             session = await db_session.get(
                 RecognitionSession, session_id, with_for_update=True
             )
+
             if session is None:
                 raise LookupError(f"인식 세션을 찾을 수 없습니다: {session_id}")
+
             if session.ended_at is not None:
-                raise SessionAlreadyEndedError("이미 종료된 인식 세션입니다")
+                raise SessionAlreadyEndedError("이미 종료된 인식 세션입니다.")
 
             phrase_id = None
             if output.phrase_code is not None:
@@ -171,6 +302,7 @@ class SQLAlchemyRecognitionRepository:
                     else None
                 ),
             )
+
             db_session.add(utterance)
             await db_session.execute(
                 update(RecognitionSession)
@@ -192,10 +324,11 @@ class SQLAlchemyRecognitionRepository:
             )
 
     async def reconcile_abandoned_sessions(self, *, before: datetime) -> int:
-        """기준 시각보다 오래된 열린 세션을 강제 종료 상태로 전환한다."""
+        """기준 시각보다 오래 열린 세션을 강제 종료 상태로 전환한다."""
 
         if before.tzinfo is None or before.utcoffset() is None:
-            raise ValueError("before에는 timezone이 포함되어야 합니다")
+            raise ValueError("before에는 timezone 정보가 포함되어야 합니다.")
+
         async with self._session_factory.begin() as db_session:
             result = await db_session.execute(
                 update(RecognitionSession)
@@ -205,12 +338,13 @@ class SQLAlchemyRecognitionRepository:
                 )
                 .values(ended_at=func.now())
             )
+
             return result.rowcount or 0
 
     async def sync_phrases(
         self, phrases: Iterable[tuple[str, str, PhraseCategory]]
     ) -> None:
-        """권위 있는 폐쇄형 문구 목록으로 phrase 테이블을 동기화한다."""
+        """권위 있는 문구 목록으로 phrase 테이블을 동기화한다."""
 
         values = [
             {
@@ -220,12 +354,13 @@ class SQLAlchemyRecognitionRepository:
             }
             for code, text, category in phrases
         ]
+
         if not values:
-            raise ValueError("동기화할 폐쇄형 문구가 비어 있습니다")
+            raise ValueError("동기화할 문구가 비어 있습니다.")
 
         phrase_codes = [value["phrase_code"] for value in values]
         if len(phrase_codes) != len(set(phrase_codes)):
-            raise ValueError("phrase_code는 중복될 수 없습니다")
+            raise ValueError("phrase_code는 중복될 수 없습니다.")
 
         statement = insert(Phrase).values(values)
         statement = statement.on_conflict_do_update(
@@ -235,6 +370,7 @@ class SQLAlchemyRecognitionRepository:
                 "category": statement.excluded.category,
             },
         )
+
         async with self._session_factory.begin() as db_session:
             await db_session.execute(statement)
             await db_session.execute(
@@ -248,14 +384,17 @@ class SQLAlchemyRecognitionRepository:
         before: datetime | None = None,
     ) -> int:
         if (session_id is None) == (before is None):
-            raise ValueError("session_id 또는 before 중 하나만 지정해야 합니다")
+            raise ValueError("session_id 또는 before 중 하나만 지정해야 합니다.")
+
         condition = (
             RecognitionSession.session_id == session_id
             if session_id is not None
             else RecognitionSession.started_at < before
         )
+
         async with self._session_factory.begin() as db_session:
             result = await db_session.execute(
                 delete(RecognitionSession).where(condition)
             )
+
             return result.rowcount or 0
