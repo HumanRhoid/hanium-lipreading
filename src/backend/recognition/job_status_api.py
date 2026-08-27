@@ -1,6 +1,7 @@
 """로그인 사용자의 비동기 추론 Job 상태 조회 HTTP API."""
 
 import logging
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -24,6 +25,19 @@ router = APIRouter(
 )
 
 
+class InferenceResultResponse(BaseModel):
+    """완료된 추론 Job의 최종 문장."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    utterance_id: int
+    text: str
+    phrase_code: str | None
+    confidence: float | None
+    model_version: str | None
+    created_at: datetime
+
+
 class InferenceJobStatusResponse(BaseModel):
     """클라이언트에 공개하는 비동기 추론 Job 상태."""
 
@@ -34,6 +48,7 @@ class InferenceJobStatusResponse(BaseModel):
     video_id: int
     status: InferenceJobStatus
     error_code: str | None
+    result: InferenceResultResponse | None
 
 
 def _require_session_token(
@@ -119,10 +134,24 @@ async def get_inference_job_status(
             detail="추론 Job을 찾을 수 없습니다.",
         )
 
+    result = (
+        InferenceResultResponse(
+            utterance_id=job.result.utterance_id,
+            text=job.result.text,
+            phrase_code=job.result.phrase_code,
+            confidence=job.result.confidence,
+            model_version=job.result.model_version,
+            created_at=job.result.created_at,
+        )
+        if job.result is not None
+        else None
+    )
+
     return InferenceJobStatusResponse(
-        job_id=job.job_id,
-        utterance_id=job.utterance_id,
-        video_id=job.video_id,
-        status=job.status,
-        error_code=job.error_code,
+        job_id=job.job.job_id,
+        utterance_id=job.job.utterance_id,
+        video_id=job.job.video_id,
+        status=job.job.status,
+        error_code=job.job.error_code,
+        result=result,
     )

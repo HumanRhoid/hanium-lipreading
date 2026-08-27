@@ -11,7 +11,11 @@ from src.backend.recognition.domain import RecognitionMode
 from src.backend.recognition.job_status_api import (
     router as job_status_router,
 )
-from src.backend.recognition.ports import InferenceJobRecord
+from src.backend.recognition.ports import (
+    InferenceJobRecord,
+    InferenceJobStatusView,
+    InferenceResultRecord,
+)
 
 SESSION_TOKEN = "test-session-token"
 
@@ -73,9 +77,11 @@ class FakeInferenceJobStatusService:
         self,
         *,
         job: InferenceJobRecord | None = None,
+        result: InferenceResultRecord | None = None,
         error: Exception | None = None,
     ) -> None:
         self.job = job
+        self.result = result
         self.error = error
         self.calls: list[dict[str, object]] = []
 
@@ -95,7 +101,13 @@ class FakeInferenceJobStatusService:
         if self.error is not None:
             raise self.error
 
-        return self.job
+        if self.job is None:
+            return None
+
+        return InferenceJobStatusView(
+            job=self.job,
+            result=self.result,
+        )
 
 
 def make_app(
@@ -167,6 +179,7 @@ async def test_get_job_status_returns_owned_job():
         "video_id": 45,
         "status": "QUEUED",
         "error_code": None,
+        "result": None,
     }
 
     assert auth_service.received_tokens == [SESSION_TOKEN]
@@ -196,10 +209,19 @@ async def test_get_job_status_returns_processing_status():
 
 
 async def test_get_job_status_returns_succeeded_status():
+    result = InferenceResultRecord(
+        utterance_id=123,
+        text="물 주세요",
+        phrase_code="REQUEST_WATER",
+        confidence=0.91,
+        model_version="fake-v1",
+        created_at=CREATED_AT,
+    )
     app = make_app(
         job_status_service=(
             FakeInferenceJobStatusService(
                 job=make_job(status="SUCCEEDED"),
+                result=result,
             )
         )
     )
@@ -209,6 +231,14 @@ async def test_get_job_status_returns_succeeded_status():
     assert response.status_code == 200
 
     assert response.json()["status"] == "SUCCEEDED"
+    assert response.json()["result"] == {
+        "utterance_id": 123,
+        "text": "물 주세요",
+        "phrase_code": "REQUEST_WATER",
+        "confidence": 0.91,
+        "model_version": "fake-v1",
+        "created_at": "2026-08-27T15:00:00Z",
+    }
 
 
 async def test_get_job_status_returns_failed_status_and_error_code():
@@ -233,6 +263,7 @@ async def test_get_job_status_returns_failed_status_and_error_code():
         "video_id": 45,
         "status": "FAILED",
         "error_code": "INFERENCE_FAILED",
+        "result": None,
     }
 
 

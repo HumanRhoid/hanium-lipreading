@@ -61,6 +61,26 @@ class InferenceJobRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class InferenceResultRecord:
+    """업로드 영상의 영구 저장된 최종 추론 결과."""
+
+    utterance_id: int
+    text: str
+    phrase_code: str | None
+    confidence: float | None
+    model_version: str | None
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class InferenceJobStatusView:
+    """소유권 확인이 끝난 Job과 선택적인 완료 결과."""
+
+    job: InferenceJobRecord
+    result: InferenceResultRecord | None
+
+
+@dataclass(frozen=True, slots=True)
 class InferenceJobEnqueueResult:
     """추론 Job enqueue 결과와 신규 생성 여부."""
 
@@ -121,6 +141,20 @@ class VideoUploadRepository(Protocol):
         consent_version: str | None,
         retention_until: datetime | None,
     ) -> VideoAssetSaveResult: ...
+
+    async def save_inference_result(
+        self,
+        *,
+        utterance_id: int,
+        prediction: Prediction,
+        model_version: str | None,
+    ) -> InferenceResultRecord: ...
+
+    async def get_inference_result(
+        self,
+        *,
+        utterance_id: int,
+    ) -> InferenceResultRecord | None: ...
 
 
 class InferenceJobQueue(Protocol):
