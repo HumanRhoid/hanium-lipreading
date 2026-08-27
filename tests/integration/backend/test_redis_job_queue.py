@@ -10,6 +10,7 @@ from redis.asyncio import Redis
 
 from src.backend.core.config import Settings
 from src.backend.recognition.adapters.redis_job_queue import (
+    INFERENCE_JOB_CONSUMER_GROUP,
     INFERENCE_JOB_STREAM,
     RedisInferenceJobQueue,
 )
@@ -99,6 +100,522 @@ async def test_redis_job_queue_ping(
     queue, _ = redis_test_context
 
     assert await queue.ping() is True
+
+
+async def test_ensure_consumer_group_creates_group(
+    redis_test_context,
+):
+    (
+        queue,
+        redis_client,
+    ) = redis_test_context
+
+    await queue.ensure_consumer_group()
+
+    groups = await redis_client.xinfo_groups(INFERENCE_JOB_STREAM)
+
+    assert len(groups) == 1
+
+    group = groups[0]
+
+    assert group["name"] == INFERENCE_JOB_CONSUMER_GROUP
+
+    assert group["last-delivered-id"] == "0-0"
+
+    assert group["consumers"] == 0
+
+    assert group["pending"] == 0
+
+    assert await redis_client.xlen(INFERENCE_JOB_STREAM) == 0
+
+
+async def test_ensure_consumer_group_is_idempotent(
+    redis_test_context,
+):
+    (
+        queue,
+        redis_client,
+    ) = redis_test_context
+
+    await queue.ensure_consumer_group()
+
+    await queue.ensure_consumer_group()
+
+    groups = await redis_client.xinfo_groups(INFERENCE_JOB_STREAM)
+
+    assert len(groups) == 1
+
+    assert groups[0]["name"] == INFERENCE_JOB_CONSUMER_GROUP
+
+    assert groups[0]["last-delivered-id"] == "0-0"
+
+
+async def test_read_next_consumes_existing_queued_job_and_leaves_it_pending(
+    redis_test_context,
+):
+    (
+        queue,
+        redis_client,
+    ) = redis_test_context
+
+    job_id = str(uuid4())
+
+    created_at = datetime(
+        2026,
+        8,
+        27,
+        17,
+        0,
+        tzinfo=UTC,
+    )
+
+    await queue.enqueue_or_get(
+        job_id=job_id,
+        utterance_id=601,
+        video_id=501,
+        object_key=("storage-user/2026/08/worker-input.webm"),
+        mode=RecognitionMode.CLOSED,
+        created_at=created_at,
+    )
+
+    await queue.ensure_consumer_group()
+
+    delivery = await queue.read_next(
+        consumer_name="worker-1",
+        block_ms=100,
+    )
+
+    assert delivery is not None
+
+    assert delivery.stream_entry_id
+
+    assert delivery.job.job_id == job_id
+
+    assert delivery.job.utterance_id == 601
+
+    assert delivery.job.video_id == 501
+
+    assert delivery.job.object_key == "storage-user/2026/08/worker-input.webm"
+
+    assert delivery.job.mode is RecognitionMode.CLOSED
+
+    assert delivery.job.status == "QUEUED"
+
+    groups = await redis_client.xinfo_groups(INFERENCE_JOB_STREAM)
+
+    assert len(groups) == 1
+
+    assert groups[0]["name"] == INFERENCE_JOB_CONSUMER_GROUP
+
+    assert groups[0]["pending"] == 1
+
+
+async def test_mark_processing_updates_queued_job_and_keeps_delivery_pending(
+    redis_test_context,
+):
+    (
+        queue,
+        redis_client,
+    ) = redis_test_context
+
+    job_id = str(uuid4())
+
+    created_at = datetime(
+        2026,
+        8,
+        27,
+        17,
+        5,
+        tzinfo=UTC,
+    )
+
+    processing_at = datetime(
+        2026,
+        8,
+        27,
+        17,
+        6,
+        tzinfo=UTC,
+    )
+
+    await queue.enqueue_or_get(
+        job_id=job_id,
+        utterance_id=602,
+        video_id=502,
+        object_key=("storage-user/2026/08/processing-input.webm"),
+        mode=RecognitionMode.CLOSED,
+        created_at=created_at,
+    )
+
+    await queue.ensure_consumer_group()
+
+    delivery = await queue.read_next(
+        consumer_name="worker-1",
+        block_ms=100,
+    )
+
+    assert delivery is not None
+    assert delivery.job.status == "QUEUED"
+
+    processing_job = await queue.mark_processing(
+        job_id=job_id,
+        updated_at=processing_at,
+    )
+
+    assert processing_job.job_id == job_id
+    assert processing_job.status == "PROCESSING"
+    assert processing_job.created_at == created_at
+    assert processing_job.updated_at == processing_at
+    assert processing_job.error_code is None
+
+    raw_job = await redis_client.hgetall(f"inference:job:{job_id}")
+
+    assert raw_job["status"] == "PROCESSING"
+    assert raw_job["updated_at"] == processing_at.isoformat()
+    assert raw_job["error_code"] == ""
+
+    groups = await redis_client.xinfo_groups(INFERENCE_JOB_STREAM)
+
+    assert len(groups) == 1
+    assert groups[0]["pending"] == 1
+
+
+async def test_mark_succeeded_updates_processing_job_and_keeps_delivery_pending(
+    redis_test_context,
+):
+    (
+        queue,
+        redis_client,
+    ) = redis_test_context
+
+    job_id = str(uuid4())
+
+    created_at = datetime(
+        2026,
+        8,
+        27,
+        17,
+        10,
+        tzinfo=UTC,
+    )
+
+    processing_at = datetime(
+        2026,
+        8,
+        27,
+        17,
+        11,
+        tzinfo=UTC,
+    )
+
+    succeeded_at = datetime(
+        2026,
+        8,
+        27,
+        17,
+        12,
+        tzinfo=UTC,
+    )
+
+    await queue.enqueue_or_get(
+        job_id=job_id,
+        utterance_id=603,
+        video_id=503,
+        object_key=("storage-user/2026/08/succeeded-input.webm"),
+        mode=RecognitionMode.CLOSED,
+        created_at=created_at,
+    )
+
+    await queue.ensure_consumer_group()
+
+    delivery = await queue.read_next(
+        consumer_name="worker-1",
+        block_ms=100,
+    )
+
+    assert delivery is not None
+
+    await queue.mark_processing(
+        job_id=job_id,
+        updated_at=processing_at,
+    )
+
+    succeeded_job = await queue.mark_succeeded(
+        job_id=job_id,
+        updated_at=succeeded_at,
+    )
+
+    assert succeeded_job.job_id == job_id
+    assert succeeded_job.status == "SUCCEEDED"
+    assert succeeded_job.created_at == created_at
+    assert succeeded_job.updated_at == succeeded_at
+    assert succeeded_job.error_code is None
+
+    raw_job = await redis_client.hgetall(f"inference:job:{job_id}")
+
+    assert raw_job["status"] == "SUCCEEDED"
+    assert raw_job["updated_at"] == succeeded_at.isoformat()
+    assert raw_job["error_code"] == ""
+
+    groups = await redis_client.xinfo_groups(INFERENCE_JOB_STREAM)
+
+    assert len(groups) == 1
+    assert groups[0]["pending"] == 1
+
+
+async def test_mark_failed_updates_processing_job_with_error_code(
+    redis_test_context,
+):
+    (
+        queue,
+        redis_client,
+    ) = redis_test_context
+
+    job_id = str(uuid4())
+
+    created_at = datetime(
+        2026,
+        8,
+        27,
+        17,
+        15,
+        tzinfo=UTC,
+    )
+
+    processing_at = datetime(
+        2026,
+        8,
+        27,
+        17,
+        16,
+        tzinfo=UTC,
+    )
+
+    failed_at = datetime(
+        2026,
+        8,
+        27,
+        17,
+        17,
+        tzinfo=UTC,
+    )
+
+    await queue.enqueue_or_get(
+        job_id=job_id,
+        utterance_id=604,
+        video_id=504,
+        object_key=("storage-user/2026/08/failed-input.webm"),
+        mode=RecognitionMode.CLOSED,
+        created_at=created_at,
+    )
+
+    await queue.ensure_consumer_group()
+
+    delivery = await queue.read_next(
+        consumer_name="worker-1",
+        block_ms=100,
+    )
+
+    assert delivery is not None
+
+    await queue.mark_processing(
+        job_id=job_id,
+        updated_at=processing_at,
+    )
+
+    failed_job = await queue.mark_failed(
+        job_id=job_id,
+        error_code="MODEL_INFERENCE_FAILED",
+        updated_at=failed_at,
+    )
+
+    assert failed_job.job_id == job_id
+    assert failed_job.status == "FAILED"
+    assert failed_job.created_at == created_at
+    assert failed_job.updated_at == failed_at
+    assert failed_job.error_code == "MODEL_INFERENCE_FAILED"
+
+    raw_job = await redis_client.hgetall(f"inference:job:{job_id}")
+
+    assert raw_job["status"] == "FAILED"
+    assert raw_job["updated_at"] == failed_at.isoformat()
+    assert raw_job["error_code"] == "MODEL_INFERENCE_FAILED"
+
+    groups = await redis_client.xinfo_groups(INFERENCE_JOB_STREAM)
+
+    assert len(groups) == 1
+    assert groups[0]["pending"] == 1
+
+
+async def test_acknowledge_removes_terminal_job_from_pending_entries(
+    redis_test_context,
+):
+    (
+        queue,
+        redis_client,
+    ) = redis_test_context
+
+    job_id = str(uuid4())
+
+    created_at = datetime(
+        2026,
+        8,
+        27,
+        17,
+        20,
+        tzinfo=UTC,
+    )
+
+    processing_at = datetime(
+        2026,
+        8,
+        27,
+        17,
+        21,
+        tzinfo=UTC,
+    )
+
+    succeeded_at = datetime(
+        2026,
+        8,
+        27,
+        17,
+        22,
+        tzinfo=UTC,
+    )
+
+    await queue.enqueue_or_get(
+        job_id=job_id,
+        utterance_id=605,
+        video_id=505,
+        object_key=("storage-user/2026/08/ack-input.webm"),
+        mode=RecognitionMode.CLOSED,
+        created_at=created_at,
+    )
+
+    await queue.ensure_consumer_group()
+
+    delivery = await queue.read_next(
+        consumer_name="worker-1",
+        block_ms=100,
+    )
+
+    assert delivery is not None
+
+    groups = await redis_client.xinfo_groups(INFERENCE_JOB_STREAM)
+
+    assert len(groups) == 1
+    assert groups[0]["pending"] == 1
+
+    await queue.mark_processing(
+        job_id=job_id,
+        updated_at=processing_at,
+    )
+
+    await queue.mark_succeeded(
+        job_id=job_id,
+        updated_at=succeeded_at,
+    )
+
+    await queue.acknowledge(
+        stream_entry_id=delivery.stream_entry_id,
+    )
+
+    groups = await redis_client.xinfo_groups(INFERENCE_JOB_STREAM)
+
+    assert len(groups) == 1
+    assert groups[0]["pending"] == 0
+
+    saved_job = await queue.get_job(job_id=job_id)
+
+    assert saved_job is not None
+    assert saved_job.status == "SUCCEEDED"
+
+
+async def test_acknowledge_is_idempotent_for_already_acknowledged_entry(
+    redis_test_context,
+):
+    (
+        queue,
+        redis_client,
+    ) = redis_test_context
+
+    job_id = str(uuid4())
+
+    created_at = datetime(
+        2026,
+        8,
+        27,
+        17,
+        25,
+        tzinfo=UTC,
+    )
+
+    processing_at = datetime(
+        2026,
+        8,
+        27,
+        17,
+        26,
+        tzinfo=UTC,
+    )
+
+    failed_at = datetime(
+        2026,
+        8,
+        27,
+        17,
+        27,
+        tzinfo=UTC,
+    )
+
+    await queue.enqueue_or_get(
+        job_id=job_id,
+        utterance_id=606,
+        video_id=506,
+        object_key=("storage-user/2026/08/ack-failed-input.webm"),
+        mode=RecognitionMode.CLOSED,
+        created_at=created_at,
+    )
+
+    await queue.ensure_consumer_group()
+
+    delivery = await queue.read_next(
+        consumer_name="worker-1",
+        block_ms=100,
+    )
+
+    assert delivery is not None
+
+    await queue.mark_processing(
+        job_id=job_id,
+        updated_at=processing_at,
+    )
+
+    await queue.mark_failed(
+        job_id=job_id,
+        error_code="MODEL_INFERENCE_FAILED",
+        updated_at=failed_at,
+    )
+
+    await queue.acknowledge(
+        stream_entry_id=delivery.stream_entry_id,
+    )
+
+    await queue.acknowledge(
+        stream_entry_id=delivery.stream_entry_id,
+    )
+
+    groups = await redis_client.xinfo_groups(INFERENCE_JOB_STREAM)
+
+    assert len(groups) == 1
+    assert groups[0]["pending"] == 0
+
+    saved_job = await queue.get_job(job_id=job_id)
+
+    assert saved_job is not None
+    assert saved_job.status == "FAILED"
+    assert saved_job.error_code == "MODEL_INFERENCE_FAILED"
 
 
 async def test_enqueue_persists_job_hash_and_stream_entry(

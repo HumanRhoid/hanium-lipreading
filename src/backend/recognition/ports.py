@@ -68,6 +68,14 @@ class InferenceJobEnqueueResult:
     created: bool
 
 
+@dataclass(frozen=True, slots=True)
+class InferenceJobDelivery:
+    """Worker가 Redis Stream에서 전달받은 추론 Job."""
+
+    stream_entry_id: str
+    job: InferenceJobRecord
+
+
 class RecognitionRepository(Protocol):
     """인식 세션과 최종 발화를 저장하는 포트."""
 
@@ -137,6 +145,61 @@ class InferenceJobQueue(Protocol):
         job_id: str,
     ) -> InferenceJobRecord | None:
         """job_id에 대응하는 현재 추론 상태를 조회한다."""
+        ...
+
+
+class InferenceJobWorkerQueue(Protocol):
+    """Worker가 추론 Job을 소비하고 상태를 변경하는 포트."""
+
+    async def ensure_consumer_group(
+        self,
+    ) -> None:
+        """Worker Consumer Group이 존재하도록 보장한다."""
+        ...
+
+    async def read_next(
+        self,
+        *,
+        consumer_name: str,
+        block_ms: int,
+    ) -> InferenceJobDelivery | None:
+        """Consumer Group에서 새 추론 Job 하나를 읽는다."""
+        ...
+
+    async def mark_processing(
+        self,
+        *,
+        job_id: str,
+        updated_at: datetime,
+    ) -> InferenceJobRecord:
+        """QUEUED Job을 PROCESSING으로 원자적으로 전환한다."""
+        ...
+
+    async def mark_succeeded(
+        self,
+        *,
+        job_id: str,
+        updated_at: datetime,
+    ) -> InferenceJobRecord:
+        """PROCESSING Job을 SUCCEEDED로 원자적으로 전환한다."""
+        ...
+
+    async def mark_failed(
+        self,
+        *,
+        job_id: str,
+        error_code: str,
+        updated_at: datetime,
+    ) -> InferenceJobRecord:
+        """PROCESSING Job을 FAILED로 원자적으로 전환한다."""
+        ...
+
+    async def acknowledge(
+        self,
+        *,
+        stream_entry_id: str,
+    ) -> None:
+        """처리가 끝난 Stream entry를 Consumer Group에서 ACK한다."""
         ...
 
 

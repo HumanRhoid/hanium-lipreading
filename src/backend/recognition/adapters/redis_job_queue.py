@@ -1,7 +1,7 @@
 """Redis Streams 기반 비동기 추론 Job queue."""
 
 from datetime import datetime
-from typing import Final, cast
+from typing import Final, Literal, cast
 from uuid import UUID
 
 from redis.asyncio import Redis
@@ -10,12 +10,14 @@ from redis.exceptions import ResponseError
 from src.backend.core.config import Settings
 from src.backend.recognition.domain import RecognitionMode
 from src.backend.recognition.ports import (
+    InferenceJobDelivery,
     InferenceJobEnqueueResult,
     InferenceJobRecord,
     InferenceJobStatus,
 )
 
 INFERENCE_JOB_STREAM: Final = "stream:inference:jobs"
+INFERENCE_JOB_CONSUMER_GROUP: Final = "inference-workers"
 
 _JOB_KEY_PREFIX: Final = "inference:job:"
 _VIDEO_JOB_KEY_PREFIX: Final = "inference:video:"
@@ -76,6 +78,60 @@ return {ARGV[1], "1"}
 """
 
 
+_MARK_PROCESSING_SCRIPT: Final = """
+if redis.call("EXISTS", KEYS[1]) == 0 then
+    return redis.error_reply("JOB_NOT_FOUND")
+end
+
+local current_status = redis.call("HGET", KEYS[1], "status")
+
+if not current_status then
+    return redis.error_reply("JOB_STATUS_MISSING")
+end
+
+if current_status ~= "QUEUED" then
+    return redis.error_reply("INVALID_STATUS_TRANSITION:" .. current_status)
+end
+
+redis.call(
+    "HSET",
+    KEYS[1],
+    "status", "PROCESSING",
+    "updated_at", ARGV[1],
+    "error_code", ""
+)
+
+return "PROCESSING"
+"""
+
+
+_TRANSITION_FROM_PROCESSING_SCRIPT: Final = """
+if redis.call("EXISTS", KEYS[1]) == 0 then
+    return redis.error_reply("JOB_NOT_FOUND")
+end
+
+local current_status = redis.call("HGET", KEYS[1], "status")
+
+if not current_status then
+    return redis.error_reply("JOB_STATUS_MISSING")
+end
+
+if current_status ~= "PROCESSING" then
+    return redis.error_reply("INVALID_STATUS_TRANSITION:" .. current_status)
+end
+
+redis.call(
+    "HSET",
+    KEYS[1],
+    "status", ARGV[1],
+    "updated_at", ARGV[2],
+    "error_code", ARGV[3]
+)
+
+return ARGV[1]
+"""
+
+
 class RedisInferenceJobQueue:
     """Redis hash와 Stream을 이용한 추론 Job queue."""
 
@@ -101,6 +157,239 @@ class RedisInferenceJobQueue:
         """Redis 연결 pool을 정리한다."""
 
         await self._redis.aclose()
+
+    async def ensure_consumer_group(
+        self,
+    ) -> None:
+        """Worker Consumer Group이 존재하도록 보장한다."""
+
+        try:
+            await self._redis.xgroup_create(
+                name=INFERENCE_JOB_STREAM,
+                groupname=INFERENCE_JOB_CONSUMER_GROUP,
+                id="0-0",
+                mkstream=True,
+            )
+        except ResponseError as exc:
+            if "BUSYGROUP" in str(exc):
+                return
+
+            raise
+
+    async def read_next(
+        self,
+        *,
+        consumer_name: str,
+        block_ms: int,
+    ) -> InferenceJobDelivery | None:
+        """Consumer Group에서 새 추론 Job 하나를 읽는다."""
+
+        consumer_name = consumer_name.strip()
+
+        if not consumer_name:
+            raise ValueError("consumer_name은 비어 있을 수 없습니다.")
+
+        if block_ms <= 0:
+            raise ValueError("block_ms는 양수여야 합니다.")
+
+        raw_result = await self._redis.xreadgroup(
+            groupname=INFERENCE_JOB_CONSUMER_GROUP,
+            consumername=consumer_name,
+            streams={
+                INFERENCE_JOB_STREAM: ">",
+            },
+            count=1,
+            block=block_ms,
+        )
+
+        parsed_delivery = self._parse_read_group_result(raw_result)
+
+        if parsed_delivery is None:
+            return None
+
+        (
+            stream_entry_id,
+            stream_payload,
+        ) = parsed_delivery
+
+        stream_job_id = self._stream_job_id(stream_payload)
+
+        job = await self.get_job(job_id=stream_job_id)
+
+        if job is None:
+            raise RuntimeError(
+                "Redis Stream이 참조하는 추론 Job 상태를 찾을 수 없습니다."
+            )
+
+        self._ensure_stream_matches_job(
+            stream_payload,
+            job,
+        )
+
+        return InferenceJobDelivery(
+            stream_entry_id=stream_entry_id,
+            job=job,
+        )
+
+    async def mark_processing(
+        self,
+        *,
+        job_id: str,
+        updated_at: datetime,
+    ) -> InferenceJobRecord:
+        """QUEUED Job을 PROCESSING으로 원자적으로 전환한다."""
+
+        canonical_job_id = self._canonical_job_id(job_id)
+        updated_at_text = self._serialize_datetime(updated_at)
+
+        try:
+            raw_result = await self._redis.eval(
+                _MARK_PROCESSING_SCRIPT,
+                1,
+                self._job_key(canonical_job_id),
+                updated_at_text,
+            )
+        except ResponseError as exc:
+            message = str(exc)
+
+            if "JOB_NOT_FOUND" in message:
+                raise RuntimeError("전환할 추론 Job을 찾을 수 없습니다.") from exc
+
+            if "JOB_STATUS_MISSING" in message:
+                raise RuntimeError("Redis 추론 Job에 status가 없습니다.") from exc
+
+            if "INVALID_STATUS_TRANSITION:" in message:
+                raise RuntimeError(
+                    "QUEUED 상태의 추론 Job만 PROCESSING으로 전환할 수 있습니다."
+                ) from exc
+
+            raise
+
+        if str(raw_result) != "PROCESSING":
+            raise RuntimeError("Redis 추론 Job 상태 전환 결과가 올바르지 않습니다.")
+
+        job = await self.get_job(job_id=canonical_job_id)
+
+        if job is None:
+            raise RuntimeError("상태 전환 후 추론 Job을 조회할 수 없습니다.")
+
+        if job.status != "PROCESSING":
+            raise RuntimeError("추론 Job이 PROCESSING 상태로 저장되지 않았습니다.")
+
+        return job
+
+    async def mark_succeeded(
+        self,
+        *,
+        job_id: str,
+        updated_at: datetime,
+    ) -> InferenceJobRecord:
+        """PROCESSING Job을 SUCCEEDED로 원자적으로 전환한다."""
+
+        return await self._transition_from_processing(
+            job_id=job_id,
+            target_status="SUCCEEDED",
+            updated_at=updated_at,
+            error_code="",
+        )
+
+    async def mark_failed(
+        self,
+        *,
+        job_id: str,
+        error_code: str,
+        updated_at: datetime,
+    ) -> InferenceJobRecord:
+        """PROCESSING Job을 FAILED로 원자적으로 전환한다."""
+
+        error_code = error_code.strip()
+
+        if not error_code:
+            raise ValueError("error_code는 비어 있을 수 없습니다.")
+
+        return await self._transition_from_processing(
+            job_id=job_id,
+            target_status="FAILED",
+            updated_at=updated_at,
+            error_code=error_code,
+        )
+
+    async def _transition_from_processing(
+        self,
+        *,
+        job_id: str,
+        target_status: Literal["SUCCEEDED", "FAILED"],
+        updated_at: datetime,
+        error_code: str,
+    ) -> InferenceJobRecord:
+        """PROCESSING Job을 terminal 상태로 원자적으로 전환한다."""
+
+        canonical_job_id = self._canonical_job_id(job_id)
+        updated_at_text = self._serialize_datetime(updated_at)
+
+        try:
+            raw_result = await self._redis.eval(
+                _TRANSITION_FROM_PROCESSING_SCRIPT,
+                1,
+                self._job_key(canonical_job_id),
+                target_status,
+                updated_at_text,
+                error_code,
+            )
+        except ResponseError as exc:
+            message = str(exc)
+
+            if "JOB_NOT_FOUND" in message:
+                raise RuntimeError("전환할 추론 Job을 찾을 수 없습니다.") from exc
+
+            if "JOB_STATUS_MISSING" in message:
+                raise RuntimeError("Redis 추론 Job에 status가 없습니다.") from exc
+
+            if "INVALID_STATUS_TRANSITION:" in message:
+                raise RuntimeError(
+                    "PROCESSING 상태의 추론 Job만 완료 상태로 전환할 수 있습니다."
+                ) from exc
+
+            raise
+
+        if str(raw_result) != target_status:
+            raise RuntimeError(
+                "Redis 추론 Job 완료 상태 전환 결과가 올바르지 않습니다."
+            )
+
+        job = await self.get_job(job_id=canonical_job_id)
+
+        if job is None:
+            raise RuntimeError("상태 전환 후 추론 Job을 조회할 수 없습니다.")
+
+        if job.status != target_status:
+            raise RuntimeError("추론 Job 완료 상태가 올바르게 저장되지 않았습니다.")
+
+        return job
+
+    async def acknowledge(
+        self,
+        *,
+        stream_entry_id: str,
+    ) -> None:
+        """처리가 끝난 Stream entry를 Consumer Group에서 ACK한다."""
+
+        stream_entry_id = stream_entry_id.strip()
+
+        if not stream_entry_id:
+            raise ValueError("stream_entry_id는 비어 있을 수 없습니다.")
+
+        acknowledged = await self._redis.xack(
+            INFERENCE_JOB_STREAM,
+            INFERENCE_JOB_CONSUMER_GROUP,
+            stream_entry_id,
+        )
+
+        if acknowledged not in {
+            0,
+            1,
+        }:
+            raise RuntimeError("Redis 추론 Job ACK 결과가 올바르지 않습니다.")
 
     async def enqueue_or_get(
         self,
@@ -223,6 +512,151 @@ class RedisInferenceJobQueue:
             return None
 
         return self._parse_job(raw_job)
+
+    @staticmethod
+    def _parse_read_group_result(
+        raw_result: object,
+    ) -> tuple[str, dict[str, str]] | None:
+        """XREADGROUP 결과에서 단일 Stream entry를 안전하게 꺼낸다."""
+
+        if (
+            isinstance(
+                raw_result,
+                (
+                    list,
+                    tuple,
+                ),
+            )
+            and not raw_result
+        ):
+            return None
+
+        if (
+            not isinstance(
+                raw_result,
+                (
+                    list,
+                    tuple,
+                ),
+            )
+            or len(raw_result) != 1
+        ):
+            raise RuntimeError("Redis 추론 Job consume 결과 형식이 올바르지 않습니다.")
+
+        stream_result = raw_result[0]
+
+        if (
+            not isinstance(
+                stream_result,
+                (
+                    list,
+                    tuple,
+                ),
+            )
+            or len(stream_result) != 2
+        ):
+            raise RuntimeError("Redis 추론 Job Stream 결과 형식이 올바르지 않습니다.")
+
+        stream_name = str(stream_result[0])
+
+        if stream_name != INFERENCE_JOB_STREAM:
+            raise RuntimeError("예상하지 못한 Redis Stream에서 추론 Job을 받았습니다.")
+
+        entries = stream_result[1]
+
+        if (
+            not isinstance(
+                entries,
+                (
+                    list,
+                    tuple,
+                ),
+            )
+            or len(entries) != 1
+        ):
+            raise RuntimeError("Redis 추론 Job entry 결과 형식이 올바르지 않습니다.")
+
+        entry = entries[0]
+
+        if (
+            not isinstance(
+                entry,
+                (
+                    list,
+                    tuple,
+                ),
+            )
+            or len(entry) != 2
+        ):
+            raise RuntimeError("Redis 추론 Job entry 형식이 올바르지 않습니다.")
+
+        stream_entry_id = str(entry[0]).strip()
+
+        if not stream_entry_id:
+            raise RuntimeError("Redis 추론 Job Stream entry ID가 비어 있습니다.")
+
+        raw_payload = entry[1]
+
+        if not isinstance(raw_payload, dict):
+            raise RuntimeError(
+                "Redis 추론 Job Stream payload 형식이 올바르지 않습니다."
+            )
+
+        stream_payload = {
+            str(key): str(value)
+            for (
+                key,
+                value,
+            ) in raw_payload.items()
+        }
+
+        return (
+            stream_entry_id,
+            stream_payload,
+        )
+
+    def _stream_job_id(
+        self,
+        stream_payload: dict[str, str],
+    ) -> str:
+        """Stream payload가 참조하는 Job ID를 검증하며 복원한다."""
+
+        job_id = stream_payload.get("job_id")
+
+        if job_id is None:
+            raise RuntimeError("Redis 추론 Job Stream payload에 job_id가 없습니다.")
+
+        return self._canonical_stored_job_id(job_id)
+
+    @staticmethod
+    def _ensure_stream_matches_job(
+        stream_payload: dict[str, str],
+        job: InferenceJobRecord,
+    ) -> None:
+        """Stream entry와 Job hash가 동일한 추론 요청을 가리키는지 확인한다."""
+
+        expected_payload = {
+            "job_id": job.job_id,
+            "utterance_id": str(job.utterance_id),
+            "video_id": str(job.video_id),
+            "object_key": job.object_key,
+            "mode": job.mode.value,
+            "created_at": job.created_at.isoformat(),
+        }
+
+        if not expected_payload.keys() <= stream_payload.keys():
+            raise RuntimeError("Redis 추론 Job Stream payload가 불완전합니다.")
+
+        if any(
+            stream_payload[field_name] != expected_value
+            for (
+                field_name,
+                expected_value,
+            ) in expected_payload.items()
+        ):
+            raise RuntimeError(
+                "Redis 추론 Job Stream payload가 Job 상태 데이터와 일치하지 않습니다."
+            )
 
     @staticmethod
     def _canonical_job_id(
