@@ -22,7 +22,11 @@ class Settings(BaseSettings):
         hide_input_in_errors=True,
     )
 
-    app_env: Literal["local", "test", "production"] = "local"
+    app_env: Literal[
+        "local",
+        "test",
+        "production",
+    ] = "local"
 
     database_url: str = Field(
         default=(
@@ -44,6 +48,7 @@ class Settings(BaseSettings):
 
     max_active_sessions: PositiveInt = 1
     max_inference_concurrency: PositiveInt = 1
+
     start_timeout_seconds: PositiveFloat = 5.0
     readiness_timeout_seconds: PositiveFloat = 2.0
     send_timeout_seconds: PositiveFloat = 2.0
@@ -56,6 +61,8 @@ class Settings(BaseSettings):
         ge=0,
     )
     database_pool_timeout_seconds: PositiveFloat = 10.0
+
+    max_video_upload_bytes: PositiveInt = 64 * 1024 * 1024
 
     object_storage_endpoint_url: str = "http://localhost:9000"
 
@@ -70,6 +77,7 @@ class Settings(BaseSettings):
     )
 
     object_storage_bucket: str = "recognition-videos"
+
     object_storage_region: str = "us-east-1"
 
     @field_validator("database_url")
@@ -93,7 +101,12 @@ class Settings(BaseSettings):
     ) -> str:
         """S3 호환 HTTP/HTTPS endpoint만 허용한다."""
 
-        if not value.startswith(("http://", "https://")):
+        if not value.startswith(
+            (
+                "http://",
+                "https://",
+            )
+        ):
             raise ValueError(
                 "object_storage_endpoint_url은 http:// 또는 https:// URL이어야 합니다."
             )
@@ -111,7 +124,7 @@ class Settings(BaseSettings):
         cls,
         value: str,
     ) -> str:
-        """Object Storage 필수 설정에 빈 문자열을 허용하지 않는다."""
+        """Object Storage 필수 설정은 빈 값을 허용하지 않는다."""
 
         value = value.strip()
 
@@ -121,7 +134,9 @@ class Settings(BaseSettings):
         return value
 
     @model_validator(mode="after")
-    def validate_environment(self) -> Self:
+    def validate_environment(
+        self,
+    ) -> Self:
         """운영 환경에서 fake 추론 backend 사용을 방지한다."""
 
         if self.app_env == "production" and self.inference_backend == "fake":

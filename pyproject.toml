@@ -23,6 +23,7 @@ dependencies = [
     "pwdlib[argon2]>=0.3.1",
     "torch",
     "torchvision>=0.28.0",
+    "python-multipart>=0.0.32",
 ]
 
 [dependency-groups]
@@ -33,6 +34,7 @@ dev = [
     "pytest-cov",
     "pytest-asyncio",
     "ruff",
+    "httpx>=0.28.1",
 ]
 
 [tool.pytest.ini_options]

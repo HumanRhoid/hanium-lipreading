@@ -6,7 +6,7 @@ class RecognitionError(Exception):
 
 
 class ModelNotReadyError(RecognitionError):
-    """완성된 추론 bundle이 준비되지 않은 상태."""
+    """활성 추론 bundle이 준비되지 않은 상태."""
 
 
 class UnsupportedRecognitionModeError(RecognitionError):
@@ -14,7 +14,7 @@ class UnsupportedRecognitionModeError(RecognitionError):
 
 
 class InferenceBusyError(RecognitionError):
-    """제한된 동기 추론 worker가 이미 사용 중인 상태."""
+    """제한된 동시 추론 worker가 이미 사용 중인 상태."""
 
 
 class SessionBusyError(RecognitionError):
@@ -34,11 +34,11 @@ class InsufficientFramesError(RecognitionError):
 
 
 class VideoTooLongError(RecognitionError):
-    """한 영상이 v1 계약의 최대 프레임 수를 넘은 상태."""
+    """영상이 허용된 최대 길이를 넘은 상태."""
 
 
 class VideoTooLargeError(RecognitionError):
-    """한 영상의 누적 JPEG byte가 v1 계약의 최대값을 넘은 상태."""
+    """영상 데이터가 허용된 최대 byte 크기를 넘은 상태."""
 
 
 class SessionClosedError(RecognitionError):
@@ -47,3 +47,27 @@ class SessionClosedError(RecognitionError):
 
 class SessionAlreadyEndedError(RecognitionError):
     """이미 종료된 DB 세션에 최종 발화를 추가하려는 상태."""
+
+
+class InvalidVideoUploadError(RecognitionError):
+    """업로드 영상 요청 형식이 올바르지 않은 상태."""
+
+
+class EmptyVideoUploadError(InvalidVideoUploadError):
+    """업로드된 영상 파일의 내용이 비어 있는 상태."""
+
+
+class UnsupportedVideoMimeTypeError(InvalidVideoUploadError):
+    """지원하지 않는 영상 MIME type이 업로드된 상태."""
+
+
+class InvalidIdempotencyKeyError(InvalidVideoUploadError):
+    """Idempotency-Key가 UUID 형식이 아닌 상태."""
+
+
+class IdempotencyConflictError(RecognitionError):
+    """같은 Idempotency-Key가 서로 다른 요청 내용에 재사용된 상태."""
+
+
+class UnsupportedVideoUploadModeError(InvalidVideoUploadError):
+    """현재 비동기 영상 업로드가 지원하지 않는 인식 mode."""
