@@ -62,14 +62,23 @@ class FakeRedis:
         eval_error: Exception | None = None,
         hashes: dict[str, dict[str, str]] | None = None,
         ping_result: bool = True,
+        xgroup_error: Exception | None = None,
+        xreadgroup_result: object = None,
+        xack_result: int = 1,
     ) -> None:
         self.eval_result = eval_result
         self.eval_error = eval_error
         self.hashes = hashes or {}
         self.ping_result = ping_result
+        self.xgroup_error = xgroup_error
+        self.xreadgroup_result = xreadgroup_result
+        self.xack_result = xack_result
 
         self.eval_calls: list[tuple[object, ...]] = []
         self.hgetall_calls: list[str] = []
+        self.xgroup_create_calls: list[dict[str, object]] = []
+        self.xreadgroup_calls: list[dict[str, object]] = []
+        self.xack_calls: list[tuple[object, ...]] = []
         self.closed = False
 
     async def ping(self):
@@ -99,6 +108,33 @@ class FakeRedis:
             key,
             {},
         )
+
+    async def xgroup_create(
+        self,
+        **kwargs,
+    ):
+        self.xgroup_create_calls.append(kwargs)
+
+        if self.xgroup_error is not None:
+            raise self.xgroup_error
+
+        return True
+
+    async def xreadgroup(
+        self,
+        **kwargs,
+    ):
+        self.xreadgroup_calls.append(kwargs)
+
+        return self.xreadgroup_result
+
+    async def xack(
+        self,
+        *args,
+    ):
+        self.xack_calls.append(args)
+
+        return self.xack_result
 
 
 def _queue_with_fake_redis(
@@ -696,3 +732,486 @@ def test_job_key_helpers():
     assert RedisInferenceJobQueue._job_key(job_id) == f"inference:job:{job_id}"
 
     assert RedisInferenceJobQueue._video_job_key(45) == "inference:video:45:job"
+
+
+UPDATED_AT = datetime(
+    2026,
+    8,
+    27,
+    17,
+    31,
+    tzinfo=UTC,
+)
+
+STREAM_ENTRY_ID = "1700000000000-0"
+
+
+def _stream_payload(
+    *,
+    job_id: str,
+    object_key: str = "storage-user/2026/08/video.webm",
+) -> dict[str, str]:
+    return {
+        "job_id": job_id,
+        "utterance_id": "123",
+        "video_id": "45",
+        "object_key": object_key,
+        "mode": "CLOSED",
+        "created_at": CREATED_AT.isoformat(),
+    }
+
+
+async def test_ensure_consumer_group_creates_group_from_stream_start():
+    redis = FakeRedis()
+    queue = _queue_with_fake_redis(redis)
+
+    await queue.ensure_consumer_group()
+
+    assert redis.xgroup_create_calls == [
+        {
+            "name": redis_job_queue_module.INFERENCE_JOB_STREAM,
+            "groupname": redis_job_queue_module.INFERENCE_JOB_CONSUMER_GROUP,
+            "id": "0-0",
+            "mkstream": True,
+        }
+    ]
+
+
+async def test_ensure_consumer_group_ignores_busygroup():
+    redis = FakeRedis(
+        xgroup_error=ResponseError("BUSYGROUP Consumer Group name already exists"),
+    )
+    queue = _queue_with_fake_redis(redis)
+
+    await queue.ensure_consumer_group()
+
+    assert len(redis.xgroup_create_calls) == 1
+
+
+async def test_ensure_consumer_group_reraises_unexpected_error():
+    redis = FakeRedis(
+        xgroup_error=ResponseError("OTHER_REDIS_ERROR"),
+    )
+    queue = _queue_with_fake_redis(redis)
+
+    with pytest.raises(
+        ResponseError,
+        match="OTHER_REDIS_ERROR",
+    ):
+        await queue.ensure_consumer_group()
+
+
+@pytest.mark.parametrize(
+    ("consumer_name", "block_ms", "message"),
+    [
+        ("   ", 100, "consumer_name"),
+        ("worker-1", 0, "block_ms"),
+        ("worker-1", -1, "block_ms"),
+    ],
+)
+async def test_read_next_rejects_invalid_request(
+    consumer_name,
+    block_ms,
+    message,
+):
+    redis = FakeRedis()
+    queue = _queue_with_fake_redis(redis)
+
+    with pytest.raises(
+        ValueError,
+        match=message,
+    ):
+        await queue.read_next(
+            consumer_name=consumer_name,
+            block_ms=block_ms,
+        )
+
+    assert redis.xreadgroup_calls == []
+
+
+async def test_read_next_returns_none_when_stream_has_no_new_job():
+    redis = FakeRedis(
+        xreadgroup_result=[],
+    )
+    queue = _queue_with_fake_redis(redis)
+
+    result = await queue.read_next(
+        consumer_name="worker-1",
+        block_ms=250,
+    )
+
+    assert result is None
+    assert redis.xreadgroup_calls == [
+        {
+            "groupname": redis_job_queue_module.INFERENCE_JOB_CONSUMER_GROUP,
+            "consumername": "worker-1",
+            "streams": {
+                redis_job_queue_module.INFERENCE_JOB_STREAM: ">",
+            },
+            "count": 1,
+            "block": 250,
+        }
+    ]
+
+
+async def test_read_next_restores_matching_job_delivery():
+    job_id = str(uuid4())
+    raw_job = _raw_job(
+        job_id=job_id,
+    )
+
+    redis = FakeRedis(
+        hashes={
+            f"inference:job:{job_id}": raw_job,
+        },
+        xreadgroup_result=[
+            (
+                redis_job_queue_module.INFERENCE_JOB_STREAM,
+                [
+                    (
+                        STREAM_ENTRY_ID,
+                        _stream_payload(job_id=job_id),
+                    )
+                ],
+            )
+        ],
+    )
+    queue = _queue_with_fake_redis(redis)
+
+    delivery = await queue.read_next(
+        consumer_name="worker-1",
+        block_ms=100,
+    )
+
+    assert delivery is not None
+    assert delivery.stream_entry_id == STREAM_ENTRY_ID
+    assert delivery.job.job_id == job_id
+    assert delivery.job.status == "QUEUED"
+
+
+async def test_read_next_fails_when_stream_job_hash_is_missing():
+    job_id = str(uuid4())
+
+    redis = FakeRedis(
+        xreadgroup_result=[
+            (
+                redis_job_queue_module.INFERENCE_JOB_STREAM,
+                [
+                    (
+                        STREAM_ENTRY_ID,
+                        _stream_payload(job_id=job_id),
+                    )
+                ],
+            )
+        ],
+    )
+    queue = _queue_with_fake_redis(redis)
+
+    with pytest.raises(
+        RuntimeError,
+        match="Job 상태",
+    ):
+        await queue.read_next(
+            consumer_name="worker-1",
+            block_ms=100,
+        )
+
+
+async def test_read_next_rejects_stream_payload_mismatch():
+    job_id = str(uuid4())
+
+    redis = FakeRedis(
+        hashes={
+            f"inference:job:{job_id}": _raw_job(
+                job_id=job_id,
+            ),
+        },
+        xreadgroup_result=[
+            (
+                redis_job_queue_module.INFERENCE_JOB_STREAM,
+                [
+                    (
+                        STREAM_ENTRY_ID,
+                        _stream_payload(
+                            job_id=job_id,
+                            object_key="storage-user/2026/08/different.webm",
+                        ),
+                    )
+                ],
+            )
+        ],
+    )
+    queue = _queue_with_fake_redis(redis)
+
+    with pytest.raises(
+        RuntimeError,
+        match="일치하지 않습니다",
+    ):
+        await queue.read_next(
+            consumer_name="worker-1",
+            block_ms=100,
+        )
+
+
+@pytest.mark.parametrize(
+    "raw_result",
+    [
+        None,
+        [("unexpected-stream", [])],
+        [(redis_job_queue_module.INFERENCE_JOB_STREAM, [])],
+        [
+            (
+                redis_job_queue_module.INFERENCE_JOB_STREAM,
+                [("", {})],
+            )
+        ],
+        [
+            (
+                redis_job_queue_module.INFERENCE_JOB_STREAM,
+                [(STREAM_ENTRY_ID, "not-a-dict")],
+            )
+        ],
+    ],
+)
+def test_parse_read_group_result_rejects_invalid_shape(raw_result):
+    with pytest.raises(RuntimeError):
+        RedisInferenceJobQueue._parse_read_group_result(raw_result)
+
+
+async def test_mark_processing_returns_updated_job():
+    job_id = str(uuid4())
+
+    redis = FakeRedis(
+        eval_result="PROCESSING",
+        hashes={
+            f"inference:job:{job_id}": _raw_job(
+                job_id=job_id,
+                status="PROCESSING",
+                updated_at=UPDATED_AT.isoformat(),
+            )
+        },
+    )
+    queue = _queue_with_fake_redis(redis)
+
+    result = await queue.mark_processing(
+        job_id=job_id,
+        updated_at=UPDATED_AT,
+    )
+
+    assert result.status == "PROCESSING"
+    assert result.updated_at == UPDATED_AT
+    assert result.error_code is None
+    assert len(redis.eval_calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("redis_message", "expected_message"),
+    [
+        ("JOB_NOT_FOUND", "찾을 수 없습니다"),
+        ("JOB_STATUS_MISSING", "status"),
+        ("INVALID_STATUS_TRANSITION:PROCESSING", "QUEUED 상태"),
+    ],
+)
+async def test_mark_processing_translates_known_redis_errors(
+    redis_message,
+    expected_message,
+):
+    redis = FakeRedis(
+        eval_error=ResponseError(redis_message),
+    )
+    queue = _queue_with_fake_redis(redis)
+
+    with pytest.raises(
+        RuntimeError,
+        match=expected_message,
+    ):
+        await queue.mark_processing(
+            job_id=str(uuid4()),
+            updated_at=UPDATED_AT,
+        )
+
+
+async def test_mark_processing_rejects_unexpected_transition_result():
+    redis = FakeRedis(
+        eval_result="QUEUED",
+    )
+    queue = _queue_with_fake_redis(redis)
+
+    with pytest.raises(
+        RuntimeError,
+        match="상태 전환 결과",
+    ):
+        await queue.mark_processing(
+            job_id=str(uuid4()),
+            updated_at=UPDATED_AT,
+        )
+
+
+async def test_mark_succeeded_returns_terminal_job():
+    job_id = str(uuid4())
+
+    redis = FakeRedis(
+        eval_result="SUCCEEDED",
+        hashes={
+            f"inference:job:{job_id}": _raw_job(
+                job_id=job_id,
+                status="SUCCEEDED",
+                updated_at=UPDATED_AT.isoformat(),
+            )
+        },
+    )
+    queue = _queue_with_fake_redis(redis)
+
+    result = await queue.mark_succeeded(
+        job_id=job_id,
+        updated_at=UPDATED_AT,
+    )
+
+    assert result.status == "SUCCEEDED"
+    assert result.updated_at == UPDATED_AT
+    assert result.error_code is None
+
+
+async def test_mark_failed_returns_terminal_job_with_error_code():
+    job_id = str(uuid4())
+
+    redis = FakeRedis(
+        eval_result="FAILED",
+        hashes={
+            f"inference:job:{job_id}": _raw_job(
+                job_id=job_id,
+                status="FAILED",
+                updated_at=UPDATED_AT.isoformat(),
+                error_code="MODEL_INFERENCE_FAILED",
+            )
+        },
+    )
+    queue = _queue_with_fake_redis(redis)
+
+    result = await queue.mark_failed(
+        job_id=job_id,
+        error_code=" MODEL_INFERENCE_FAILED ",
+        updated_at=UPDATED_AT,
+    )
+
+    assert result.status == "FAILED"
+    assert result.updated_at == UPDATED_AT
+    assert result.error_code == "MODEL_INFERENCE_FAILED"
+
+
+async def test_mark_failed_rejects_blank_error_code():
+    redis = FakeRedis()
+    queue = _queue_with_fake_redis(redis)
+
+    with pytest.raises(
+        ValueError,
+        match="error_code",
+    ):
+        await queue.mark_failed(
+            job_id=str(uuid4()),
+            error_code="   ",
+            updated_at=UPDATED_AT,
+        )
+
+    assert redis.eval_calls == []
+
+
+@pytest.mark.parametrize(
+    ("redis_message", "expected_message"),
+    [
+        ("JOB_NOT_FOUND", "찾을 수 없습니다"),
+        ("JOB_STATUS_MISSING", "status"),
+        ("INVALID_STATUS_TRANSITION:QUEUED", "PROCESSING 상태"),
+    ],
+)
+async def test_terminal_transition_translates_known_redis_errors(
+    redis_message,
+    expected_message,
+):
+    redis = FakeRedis(
+        eval_error=ResponseError(redis_message),
+    )
+    queue = _queue_with_fake_redis(redis)
+
+    with pytest.raises(
+        RuntimeError,
+        match=expected_message,
+    ):
+        await queue.mark_succeeded(
+            job_id=str(uuid4()),
+            updated_at=UPDATED_AT,
+        )
+
+
+async def test_terminal_transition_rejects_unexpected_result():
+    redis = FakeRedis(
+        eval_result="PROCESSING",
+    )
+    queue = _queue_with_fake_redis(redis)
+
+    with pytest.raises(
+        RuntimeError,
+        match="완료 상태 전환 결과",
+    ):
+        await queue.mark_succeeded(
+            job_id=str(uuid4()),
+            updated_at=UPDATED_AT,
+        )
+
+
+@pytest.mark.parametrize(
+    "ack_result",
+    [
+        0,
+        1,
+    ],
+)
+async def test_acknowledge_accepts_idempotent_redis_results(
+    ack_result,
+):
+    redis = FakeRedis(
+        xack_result=ack_result,
+    )
+    queue = _queue_with_fake_redis(redis)
+
+    await queue.acknowledge(
+        stream_entry_id=f" {STREAM_ENTRY_ID} ",
+    )
+
+    assert redis.xack_calls == [
+        (
+            redis_job_queue_module.INFERENCE_JOB_STREAM,
+            redis_job_queue_module.INFERENCE_JOB_CONSUMER_GROUP,
+            STREAM_ENTRY_ID,
+        )
+    ]
+
+
+async def test_acknowledge_rejects_blank_stream_entry_id():
+    redis = FakeRedis()
+    queue = _queue_with_fake_redis(redis)
+
+    with pytest.raises(
+        ValueError,
+        match="stream_entry_id",
+    ):
+        await queue.acknowledge(
+            stream_entry_id="   ",
+        )
+
+    assert redis.xack_calls == []
+
+
+async def test_acknowledge_rejects_unexpected_redis_result():
+    redis = FakeRedis(
+        xack_result=2,
+    )
+    queue = _queue_with_fake_redis(redis)
+
+    with pytest.raises(
+        RuntimeError,
+        match="ACK 결과",
+    ):
+        await queue.acknowledge(
+            stream_entry_id=STREAM_ENTRY_ID,
+        )
