@@ -17,15 +17,22 @@ from src.backend.recognition.errors import (
     UnsupportedVideoUploadModeError,
     VideoTooLargeError,
 )
-from src.backend.recognition.ports import VideoAssetRecord
+from src.backend.recognition.ports import (
+    InferenceJobRecord,
+    VideoAssetRecord,
+)
+from src.backend.recognition.submission_service import (
+    RecognitionSubmissionResult,
+)
 from src.backend.recognition.upload_api import router as upload_router
-from src.backend.recognition.video_upload_service import VideoUploadResult
 
 SESSION_TOKEN = "test-session-token"
 
 IDEMPOTENCY_KEY = "12345678-1234-4234-8234-123456789abc"
 
 STORAGE_UUID = UUID("11111111-2222-4333-8444-555555555555")
+
+JOB_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
 
 CREATED_AT = datetime(
     2026,
@@ -61,11 +68,11 @@ class FakeAuthService:
         )
 
 
-class FakeVideoUploadService:
+class FakeSubmissionService:
     def __init__(
         self,
         *,
-        result: VideoUploadResult | None = None,
+        result: RecognitionSubmissionResult | None = None,
         error: Exception | None = None,
     ) -> None:
         self.result = result
@@ -73,7 +80,7 @@ class FakeVideoUploadService:
 
         self.calls: list[dict[str, object]] = []
 
-    async def upload(
+    async def submit(
         self,
         *,
         user_id: int,
@@ -82,7 +89,7 @@ class FakeVideoUploadService:
         data: bytes,
         content_type: str,
         mode: RecognitionMode,
-    ) -> VideoUploadResult:
+    ) -> RecognitionSubmissionResult:
         self.calls.append(
             {
                 "user_id": user_id,
@@ -122,10 +129,37 @@ def make_asset() -> VideoAssetRecord:
     )
 
 
+def make_job() -> InferenceJobRecord:
+    asset = make_asset()
+
+    return InferenceJobRecord(
+        job_id=JOB_ID,
+        utterance_id=asset.utterance_id,
+        video_id=asset.video_id,
+        object_key=asset.object_key,
+        mode=RecognitionMode.CLOSED,
+        status="QUEUED",
+        created_at=CREATED_AT,
+        updated_at=CREATED_AT,
+        error_code=None,
+    )
+
+
+def make_submission_result(
+    *,
+    duplicate: bool = False,
+) -> RecognitionSubmissionResult:
+    return RecognitionSubmissionResult(
+        asset=make_asset(),
+        job=make_job(),
+        duplicate=duplicate,
+    )
+
+
 def make_app(
     *,
     auth_service: FakeAuthService | None = None,
-    upload_service: FakeVideoUploadService | None = None,
+    submission_service: FakeSubmissionService | None = None,
     max_upload_bytes: int = 1024,
 ) -> FastAPI:
     app = FastAPI()
@@ -138,14 +172,11 @@ def make_app(
         auth_service if auth_service is not None else FakeAuthService()
     )
 
-    app.state.video_upload_service = (
-        upload_service
-        if upload_service is not None
-        else FakeVideoUploadService(
-            result=VideoUploadResult(
-                asset=make_asset(),
-                duplicate=False,
-            )
+    app.state.submission_service = (
+        submission_service
+        if submission_service is not None
+        else FakeSubmissionService(
+            result=make_submission_result(),
         )
     )
 
@@ -191,60 +222,54 @@ async def request_upload(
         )
 
 
-async def test_upload_returns_201_for_new_video():
+async def test_upload_returns_202_for_new_queued_video():
     auth_service = FakeAuthService()
 
-    upload_service = FakeVideoUploadService(
-        result=VideoUploadResult(
-            asset=make_asset(),
+    submission_service = FakeSubmissionService(
+        result=make_submission_result(
             duplicate=False,
         )
     )
 
     app = make_app(
         auth_service=auth_service,
-        upload_service=upload_service,
+        submission_service=submission_service,
     )
 
     response = await request_upload(app)
 
-    assert response.status_code == 201
+    assert response.status_code == 202
 
     assert response.json() == {
         "utterance_id": 123,
         "video_id": 45,
-        "status": "UPLOADED",
+        "job_id": JOB_ID,
+        "status": "QUEUED",
         "duplicate": False,
     }
 
     assert auth_service.received_tokens == [SESSION_TOKEN]
 
-    assert len(upload_service.calls) == 1
+    assert len(submission_service.calls) == 1
 
-    call = upload_service.calls[0]
+    call = submission_service.calls[0]
 
     assert call["user_id"] == 7
-
     assert call["storage_uuid"] == STORAGE_UUID
-
     assert call["idempotency_key"] == IDEMPOTENCY_KEY
-
     assert call["data"] == b"video"
-
     assert call["content_type"] == "video/webm"
-
     assert call["mode"] is RecognitionMode.CLOSED
 
 
-async def test_upload_returns_200_for_duplicate_request():
-    upload_service = FakeVideoUploadService(
-        result=VideoUploadResult(
-            asset=make_asset(),
+async def test_upload_returns_200_for_duplicate_queued_request():
+    submission_service = FakeSubmissionService(
+        result=make_submission_result(
             duplicate=True,
         )
     )
 
-    app = make_app(upload_service=upload_service)
+    app = make_app(submission_service=submission_service)
 
     response = await request_upload(app)
 
@@ -253,7 +278,8 @@ async def test_upload_returns_200_for_duplicate_request():
     assert response.json() == {
         "utterance_id": 123,
         "video_id": 45,
-        "status": "UPLOADED",
+        "job_id": JOB_ID,
+        "status": "QUEUED",
         "duplicate": True,
     }
 
@@ -266,21 +292,14 @@ async def test_upload_does_not_expose_storage_information():
     payload = response.json()
 
     assert "object_key" not in payload
-
     assert "storage_uuid" not in payload
-
     assert "user_id" not in payload
 
 
 async def test_missing_session_token_returns_401():
-    upload_service = FakeVideoUploadService(
-        result=VideoUploadResult(
-            asset=make_asset(),
-            duplicate=False,
-        )
-    )
+    submission_service = FakeSubmissionService(result=make_submission_result())
 
-    app = make_app(upload_service=upload_service)
+    app = make_app(submission_service=submission_service)
 
     response = await request_upload(
         app,
@@ -289,40 +308,30 @@ async def test_missing_session_token_returns_401():
 
     assert response.status_code == 401
 
-    assert upload_service.calls == []
+    assert submission_service.calls == []
 
 
 async def test_invalid_session_token_returns_401():
     auth_service = FakeAuthService(invalid_session=True)
 
-    upload_service = FakeVideoUploadService(
-        result=VideoUploadResult(
-            asset=make_asset(),
-            duplicate=False,
-        )
-    )
+    submission_service = FakeSubmissionService(result=make_submission_result())
 
     app = make_app(
         auth_service=auth_service,
-        upload_service=upload_service,
+        submission_service=submission_service,
     )
 
     response = await request_upload(app)
 
     assert response.status_code == 401
 
-    assert upload_service.calls == []
+    assert submission_service.calls == []
 
 
 async def test_missing_idempotency_key_returns_400():
-    upload_service = FakeVideoUploadService(
-        result=VideoUploadResult(
-            asset=make_asset(),
-            duplicate=False,
-        )
-    )
+    submission_service = FakeSubmissionService(result=make_submission_result())
 
-    app = make_app(upload_service=upload_service)
+    app = make_app(submission_service=submission_service)
 
     response = await request_upload(
         app,
@@ -331,15 +340,15 @@ async def test_missing_idempotency_key_returns_400():
 
     assert response.status_code == 400
 
-    assert upload_service.calls == []
+    assert submission_service.calls == []
 
 
 async def test_invalid_idempotency_key_returns_400():
-    upload_service = FakeVideoUploadService(
+    submission_service = FakeSubmissionService(
         error=InvalidIdempotencyKeyError("Idempotency-Key는 UUID 형식이어야 합니다.")
     )
 
-    app = make_app(upload_service=upload_service)
+    app = make_app(submission_service=submission_service)
 
     response = await request_upload(
         app,
@@ -350,11 +359,11 @@ async def test_invalid_idempotency_key_returns_400():
 
 
 async def test_empty_video_returns_400():
-    upload_service = FakeVideoUploadService(
+    submission_service = FakeSubmissionService(
         error=EmptyVideoUploadError("빈 영상 파일은 업로드할 수 없습니다.")
     )
 
-    app = make_app(upload_service=upload_service)
+    app = make_app(submission_service=submission_service)
 
     response = await request_upload(
         app,
@@ -365,11 +374,11 @@ async def test_empty_video_returns_400():
 
 
 async def test_unsupported_mime_type_returns_415():
-    upload_service = FakeVideoUploadService(
+    submission_service = FakeSubmissionService(
         error=UnsupportedVideoMimeTypeError("지원하지 않는 영상 형식입니다.")
     )
 
-    app = make_app(upload_service=upload_service)
+    app = make_app(submission_service=submission_service)
 
     response = await request_upload(
         app,
@@ -380,13 +389,13 @@ async def test_unsupported_mime_type_returns_415():
 
 
 async def test_idempotency_conflict_returns_409():
-    upload_service = FakeVideoUploadService(
+    submission_service = FakeSubmissionService(
         error=IdempotencyConflictError(
             "같은 Idempotency-Key가 다른 영상에 사용되었습니다."
         )
     )
 
-    app = make_app(upload_service=upload_service)
+    app = make_app(submission_service=submission_service)
 
     response = await request_upload(app)
 
@@ -394,15 +403,10 @@ async def test_idempotency_conflict_returns_409():
 
 
 async def test_oversized_video_returns_413_before_service_call():
-    upload_service = FakeVideoUploadService(
-        result=VideoUploadResult(
-            asset=make_asset(),
-            duplicate=False,
-        )
-    )
+    submission_service = FakeSubmissionService(result=make_submission_result())
 
     app = make_app(
-        upload_service=upload_service,
+        submission_service=submission_service,
         max_upload_bytes=4,
     )
 
@@ -413,15 +417,15 @@ async def test_oversized_video_returns_413_before_service_call():
 
     assert response.status_code == 413
 
-    assert upload_service.calls == []
+    assert submission_service.calls == []
 
 
 async def test_service_video_too_large_error_returns_413():
-    upload_service = FakeVideoUploadService(
+    submission_service = FakeSubmissionService(
         error=VideoTooLargeError("영상 파일 크기가 허용 범위를 초과했습니다.")
     )
 
-    app = make_app(upload_service=upload_service)
+    app = make_app(submission_service=submission_service)
 
     response = await request_upload(app)
 
@@ -429,13 +433,13 @@ async def test_service_video_too_large_error_returns_413():
 
 
 async def test_open_mode_returns_400_when_service_rejects_it():
-    upload_service = FakeVideoUploadService(
+    submission_service = FakeSubmissionService(
         error=UnsupportedVideoUploadModeError(
             "현재 영상 업로드는 CLOSED mode만 지원합니다."
         )
     )
 
-    app = make_app(upload_service=upload_service)
+    app = make_app(submission_service=submission_service)
 
     response = await request_upload(
         app,
@@ -444,18 +448,13 @@ async def test_open_mode_returns_400_when_service_rejects_it():
 
     assert response.status_code == 400
 
-    assert upload_service.calls[0]["mode"] is RecognitionMode.OPEN
+    assert submission_service.calls[0]["mode"] is RecognitionMode.OPEN
 
 
 async def test_invalid_mode_returns_422_before_service_call():
-    upload_service = FakeVideoUploadService(
-        result=VideoUploadResult(
-            asset=make_asset(),
-            duplicate=False,
-        )
-    )
+    submission_service = FakeSubmissionService(result=make_submission_result())
 
-    app = make_app(upload_service=upload_service)
+    app = make_app(submission_service=submission_service)
 
     response = await request_upload(
         app,
@@ -464,15 +463,15 @@ async def test_invalid_mode_returns_422_before_service_call():
 
     assert response.status_code == 422
 
-    assert upload_service.calls == []
+    assert submission_service.calls == []
 
 
 async def test_unexpected_service_error_returns_safe_500():
-    upload_service = FakeVideoUploadService(
-        error=RuntimeError("database-password=secret-value")
+    submission_service = FakeSubmissionService(
+        error=RuntimeError("redis-password=secret-value")
     )
 
-    app = make_app(upload_service=upload_service)
+    app = make_app(submission_service=submission_service)
 
     response = await request_upload(app)
 
@@ -490,7 +489,7 @@ async def test_unexpected_service_error_returns_safe_500():
 async def test_missing_upload_dependencies_returns_503():
     app = make_app()
 
-    app.state.auth_service = None
+    app.state.submission_service = None
 
     response = await request_upload(app)
 

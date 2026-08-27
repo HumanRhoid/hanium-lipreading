@@ -1,6 +1,7 @@
 """환경변수 기반 백엔드 설정."""
 
 from typing import Literal, Self
+from urllib.parse import urlsplit
 
 from pydantic import (
     Field,
@@ -32,6 +33,11 @@ class Settings(BaseSettings):
         default=(
             "postgresql+asyncpg://postgres:postgres@localhost:5432/hanium_lipreading"
         ),
+        repr=False,
+    )
+
+    redis_url: str = Field(
+        default="redis://localhost:6379/0",
         repr=False,
     )
 
@@ -90,6 +96,32 @@ class Settings(BaseSettings):
 
         if not value.startswith("postgresql+asyncpg://"):
             raise ValueError("database_url은 postgresql+asyncpg URL이어야 합니다.")
+
+        return value
+
+    @field_validator("redis_url")
+    @classmethod
+    def validate_redis_url(
+        cls,
+        value: str,
+    ) -> str:
+        """Redis TCP/TLS URL만 허용한다."""
+
+        value = value.strip()
+
+        if not value:
+            raise ValueError("redis_url은 비어 있을 수 없습니다.")
+
+        parsed = urlsplit(value)
+
+        if parsed.scheme not in {
+            "redis",
+            "rediss",
+        }:
+            raise ValueError("redis_url은 redis:// 또는 rediss:// URL이어야 합니다.")
+
+        if parsed.hostname is None:
+            raise ValueError("redis_url에는 Redis host가 필요합니다.")
 
         return value
 

@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import Literal, Protocol
 
 from src.backend.recognition.domain import (
     ModelManifest,
@@ -10,6 +10,13 @@ from src.backend.recognition.domain import (
     RecognitionMode,
     RecognitionOutput,
 )
+
+InferenceJobStatus = Literal[
+    "QUEUED",
+    "PROCESSING",
+    "SUCCEEDED",
+    "FAILED",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +42,29 @@ class VideoAssetSaveResult:
     """영상 메타데이터 저장 결과와 신규 생성 여부."""
 
     asset: VideoAssetRecord
+    created: bool
+
+
+@dataclass(frozen=True, slots=True)
+class InferenceJobRecord:
+    """Redis에 저장되는 비동기 추론 Job 상태."""
+
+    job_id: str
+    utterance_id: int
+    video_id: int
+    object_key: str
+    mode: RecognitionMode
+    status: InferenceJobStatus
+    created_at: datetime
+    updated_at: datetime
+    error_code: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class InferenceJobEnqueueResult:
+    """추론 Job enqueue 결과와 신규 생성 여부."""
+
+    job: InferenceJobRecord
     created: bool
 
 
@@ -75,6 +105,31 @@ class VideoUploadRepository(Protocol):
         consent_version: str | None,
         retention_until: datetime | None,
     ) -> VideoAssetSaveResult: ...
+
+
+class InferenceJobQueue(Protocol):
+    """비동기 영상 추론 Job을 queue에 등록하고 상태를 조회하는 포트."""
+
+    async def enqueue_or_get(
+        self,
+        *,
+        job_id: str,
+        utterance_id: int,
+        video_id: int,
+        object_key: str,
+        mode: RecognitionMode,
+        created_at: datetime,
+    ) -> InferenceJobEnqueueResult:
+        """video_id 기준 중복 enqueue 없이 Job을 생성하거나 기존 Job을 반환한다."""
+        ...
+
+    async def get_job(
+        self,
+        *,
+        job_id: str,
+    ) -> InferenceJobRecord | None:
+        """job_id에 대응하는 현재 추론 상태를 조회한다."""
+        ...
 
 
 class RecognitionGateway(Protocol):

@@ -37,14 +37,15 @@ router = APIRouter(
 UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
 
 
-class VideoUploadStoredResponse(BaseModel):
-    """Redis queue 연결 전 영상 저장 단계의 임시 HTTP 응답."""
+class VideoUploadQueuedResponse(BaseModel):
+    """Redis 추론 queue 등록까지 완료된 영상 업로드 응답."""
 
     model_config = ConfigDict(extra="forbid")
 
     utterance_id: int
     video_id: int
-    status: Literal["UPLOADED"] = "UPLOADED"
+    job_id: str
+    status: Literal["QUEUED"] = "QUEUED"
     duplicate: bool
 
 
@@ -99,8 +100,8 @@ def _require_header(
 
 @router.post(
     "/videos",
-    response_model=VideoUploadStoredResponse,
-    status_code=status.HTTP_201_CREATED,
+    response_model=VideoUploadQueuedResponse,
+    status_code=status.HTTP_202_ACCEPTED,
 )
 async def upload_recognition_video(
     request: Request,
@@ -121,8 +122,8 @@ async def upload_recognition_video(
         str | None,
         Header(alias="Idempotency-Key"),
     ] = None,
-) -> VideoUploadStoredResponse:
-    """영상을 private Object Storage에 저장하고 PG 메타데이터를 생성한다."""
+) -> VideoUploadQueuedResponse:
+    """영상을 저장하고 Redis 비동기 추론 queue에 Job을 등록한다."""
 
     session_token = _require_header(
         session_token,
@@ -140,13 +141,13 @@ async def upload_recognition_video(
         None,
     )
 
-    upload_service = getattr(
+    submission_service = getattr(
         request.app.state,
-        "video_upload_service",
+        "submission_service",
         None,
     )
 
-    if auth_service is None or upload_service is None:
+    if auth_service is None or submission_service is None:
         raise HTTPException(
             status_code=(status.HTTP_503_SERVICE_UNAVAILABLE),
             detail=("영상 업로드 서비스를 사용할 수 없습니다."),
@@ -166,7 +167,7 @@ async def upload_recognition_video(
             max_bytes=(request.app.state.settings.max_video_upload_bytes),
         )
 
-        result = await upload_service.upload(
+        result = await submission_service.submit(
             user_id=user.user_id,
             storage_uuid=user.storage_uuid,
             idempotency_key=idempotency_key,
@@ -216,7 +217,7 @@ async def upload_recognition_video(
 
     except Exception as exc:
         logger.error(
-            "영상 HTTP 업로드 처리 실패: error_type=%s",
+            "영상 HTTP 업로드 및 추론 Job 등록 실패: error_type=%s",
             type(exc).__name__,
         )
 
@@ -228,8 +229,9 @@ async def upload_recognition_video(
     if result.duplicate:
         response.status_code = status.HTTP_200_OK
 
-    return VideoUploadStoredResponse(
+    return VideoUploadQueuedResponse(
         utterance_id=(result.asset.utterance_id),
         video_id=(result.asset.video_id),
+        job_id=(result.job.job_id),
         duplicate=(result.duplicate),
     )

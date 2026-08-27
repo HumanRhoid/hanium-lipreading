@@ -5,18 +5,109 @@ from pydantic import ValidationError
 
 from src.backend.core.config import Settings
 
+TEST_DATABASE_URL = "postgresql+asyncpg://postgres:postgres@localhost:5432/test_db"
+
 
 def test_settings_accept_async_postgresql_url():
     settings = Settings(
         _env_file=None,
         app_env="test",
-        database_url=("postgresql+asyncpg://postgres:postgres@localhost:5432/test_db"),
+        database_url=TEST_DATABASE_URL,
         inference_backend="fake",
     )
 
     assert settings.database_url.startswith("postgresql+asyncpg://")
 
     assert settings.allowed_origins == ["http://localhost:5173"]
+
+
+def test_redis_url_has_safe_default():
+    settings = Settings(
+        _env_file=None,
+        app_env="test",
+        database_url=TEST_DATABASE_URL,
+    )
+
+    assert settings.redis_url == "redis://localhost:6379/0"
+
+
+def test_redis_url_is_loaded_from_environment(
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "REDIS_URL",
+        "redis://localhost:6380/2",
+    )
+
+    settings = Settings(
+        _env_file=None,
+        app_env="test",
+        database_url=TEST_DATABASE_URL,
+    )
+
+    assert settings.redis_url == "redis://localhost:6380/2"
+
+
+def test_settings_accept_rediss_url():
+    settings = Settings(
+        _env_file=None,
+        app_env="test",
+        database_url=TEST_DATABASE_URL,
+        redis_url="rediss://redis.example.com:6380/1",
+    )
+
+    assert settings.redis_url == "rediss://redis.example.com:6380/1"
+
+
+@pytest.mark.parametrize(
+    "redis_url",
+    [
+        "",
+        "http://localhost:6379/0",
+        "redis://",
+    ],
+)
+def test_settings_reject_invalid_redis_url(
+    redis_url,
+):
+    with pytest.raises(ValidationError):
+        Settings(
+            _env_file=None,
+            app_env="test",
+            database_url=TEST_DATABASE_URL,
+            redis_url=redis_url,
+        )
+
+
+def test_redis_password_is_hidden_from_settings_repr_and_validation_error():
+    password = "synthetic-redis-secret"
+
+    redis_url = f"redis://default:{password}@localhost:6379/0"
+
+    settings = Settings(
+        _env_file=None,
+        app_env="test",
+        database_url=TEST_DATABASE_URL,
+        redis_url=redis_url,
+    )
+
+    assert password not in repr(settings)
+
+    assert password not in str(settings)
+
+    invalid_url = f"http://default:{password}@localhost:6379/0"
+
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(
+            _env_file=None,
+            app_env="test",
+            database_url=TEST_DATABASE_URL,
+            redis_url=invalid_url,
+        )
+
+    assert password not in str(exc_info.value)
+
+    assert password not in repr(exc_info.value)
 
 
 def test_websocket_timeouts_are_loaded_from_environment(
@@ -40,7 +131,7 @@ def test_websocket_timeouts_are_loaded_from_environment(
     settings = Settings(
         _env_file=None,
         app_env="test",
-        database_url=("postgresql+asyncpg://postgres:postgres@localhost:5432/test_db"),
+        database_url=TEST_DATABASE_URL,
     )
 
     assert settings.send_timeout_seconds == 0.25
@@ -54,7 +145,7 @@ def test_video_upload_limit_has_safe_default():
     settings = Settings(
         _env_file=None,
         app_env="test",
-        database_url=("postgresql+asyncpg://postgres:postgres@localhost:5432/test_db"),
+        database_url=TEST_DATABASE_URL,
     )
 
     assert settings.max_video_upload_bytes == 64 * 1024 * 1024
@@ -71,7 +162,7 @@ def test_video_upload_limit_is_loaded_from_environment(
     settings = Settings(
         _env_file=None,
         app_env="test",
-        database_url=("postgresql+asyncpg://postgres:postgres@localhost:5432/test_db"),
+        database_url=TEST_DATABASE_URL,
     )
 
     assert settings.max_video_upload_bytes == 10 * 1024 * 1024
@@ -122,7 +213,7 @@ def test_settings_reject_non_async_postgresql_url():
         Settings(
             _env_file=None,
             app_env="test",
-            database_url=("sqlite+aiosqlite:///test.db"),
+            database_url="sqlite+aiosqlite:///test.db",
         )
 
 
@@ -185,9 +276,7 @@ def test_settings_reject_non_positive_limits(
     values = {
         "_env_file": None,
         "app_env": "test",
-        "database_url": (
-            "postgresql+asyncpg://postgres:postgres@localhost:5432/test_db"
-        ),
+        "database_url": TEST_DATABASE_URL,
         field: value,
     }
 

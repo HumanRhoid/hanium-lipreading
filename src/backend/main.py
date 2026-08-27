@@ -19,6 +19,9 @@ from src.backend.recognition.adapters.inference import (
 )
 from src.backend.recognition.adapters.media import JpegFrameValidator
 from src.backend.recognition.adapters.object_storage import S3ObjectStorage
+from src.backend.recognition.adapters.redis_job_queue import (
+    RedisInferenceJobQueue,
+)
 from src.backend.recognition.adapters.repository import (
     SQLAlchemyRecognitionRepository,
 )
@@ -29,6 +32,7 @@ from src.backend.recognition.domain import (
 )
 from src.backend.recognition.ports import (
     FrameValidator,
+    InferenceJobQueue,
     ObjectStorage,
     RecognitionGateway,
     RecognitionRepository,
@@ -36,6 +40,9 @@ from src.backend.recognition.ports import (
 from src.backend.recognition.service import (
     NoopTextCorrector,
     RecognitionService,
+)
+from src.backend.recognition.submission_service import (
+    RecognitionSubmissionService,
 )
 from src.backend.recognition.upload_api import router as recognition_upload_router
 from src.backend.recognition.video_upload_service import (
@@ -188,6 +195,8 @@ def create_app(
     auth_service: AuthService | None = None,
     object_storage: ObjectStorage | None = None,
     video_upload_service: VideoUploadService | None = None,
+    inference_job_queue: InferenceJobQueue | None = None,
+    submission_service: RecognitionSubmissionService | None = None,
 ) -> FastAPI:
     """운영 구현과 테스트 대역을 주입할 수 있는 애플리케이션을 생성한다."""
 
@@ -270,6 +279,22 @@ def create_app(
 
             dependency_closes.append(app_frame_validator.close)
 
+            if inference_job_queue is None:
+                app_inference_job_queue = RedisInferenceJobQueue(app_settings)
+
+                dependency_closes.append(app_inference_job_queue.close)
+            else:
+                app_inference_job_queue = inference_job_queue
+
+            app_submission_service = (
+                submission_service
+                if submission_service is not None
+                else RecognitionSubmissionService(
+                    video_upload_service=app_video_upload_service,
+                    inference_job_queue=app_inference_job_queue,
+                )
+            )
+
             app.state.settings = app_settings
 
             app.state.database = app_database
@@ -290,6 +315,10 @@ def create_app(
             app.state.object_storage = app_object_storage
 
             app.state.video_upload_service = app_video_upload_service
+
+            app.state.inference_job_queue = app_inference_job_queue
+
+            app.state.submission_service = app_submission_service
 
             app.state.auth_repository = app_auth_repository
 
