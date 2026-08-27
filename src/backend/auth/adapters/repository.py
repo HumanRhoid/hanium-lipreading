@@ -1,6 +1,7 @@
 """사용자 및 로그인 세션 SQLAlchemy 모델과 PostgreSQL repository."""
 
 from datetime import datetime, timezone
+from uuid import UUID, uuid4
 
 from sqlalchemy import (
     DateTime,
@@ -9,6 +10,7 @@ from sqlalchemy import (
     Integer,
     String,
     UniqueConstraint,
+    Uuid,
     func,
     select,
 )
@@ -22,12 +24,21 @@ class User(Base):
     """사용자 계정 정보를 저장하는 모델."""
 
     __tablename__ = "users"
-    __table_args__ = (UniqueConstraint("username"),)
+    __table_args__ = (
+        UniqueConstraint("username"),
+        UniqueConstraint("storage_uuid"),
+    )
 
     user_id: Mapped[int] = mapped_column(
         Integer,
         Identity(),
         primary_key=True,
+    )
+
+    storage_uuid: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        nullable=False,
+        default=uuid4,
     )
 
     username: Mapped[str] = mapped_column(
@@ -100,12 +111,17 @@ class SQLAlchemyAuthRepository:
     ) -> None:
         self._session_factory = session_factory
 
-    async def get_user_by_username(self, username: str) -> User | None:
+    async def get_user_by_username(
+        self,
+        username: str,
+    ) -> User | None:
         """username으로 사용자를 조회한다."""
 
         async with self._session_factory() as session:
             result = await session.execute(
-                select(User).where(User.username == username)
+                select(User).where(
+                    User.username == username,
+                )
             )
             return result.scalar_one_or_none()
 

@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 from alembic.config import Config
@@ -27,6 +28,8 @@ MANAGED_TABLES = {
     "phrase_usage_stat",
 }
 
+STORAGE_UUID_PREVIOUS_REVISION = "bf490b4f7d1d"
+
 
 def _alembic_config() -> Config:
     """프로젝트 루트를 기준으로 Alembic 설정을 생성한다."""
@@ -44,7 +47,7 @@ async def _drop_managed_tables(database_url: str) -> None:
             actual_database = await connection.scalar(text("SELECT current_database()"))
 
             if actual_database != make_url(database_url).database:
-                raise RuntimeError("연결된 DB가 TEST_DATABASE_URL과 다릅니다.")
+                raise RuntimeError("연결된 DB가 TEST_DATABASE_URL과 일치하지 않습니다.")
 
             # FK 의존성이 있는 테이블부터 제거한다.
             await connection.execute(
@@ -98,6 +101,10 @@ async def _schema_snapshot(
                         for constraint in inspector.get_check_constraints(
                             "phrase_usage_stat"
                         )
+                    },
+                    "users_uniques": {
+                        constraint["name"]
+                        for constraint in inspector.get_unique_constraints("users")
                     },
                     "phrase_uniques": {
                         constraint["name"]
@@ -154,6 +161,13 @@ async def _schema_snapshot(
                             "phrase_usage_stat"
                         )
                     },
+                    "users_columns": {
+                        column["name"]: {
+                            "nullable": column["nullable"],
+                            "type": str(column["type"]).upper(),
+                        }
+                        for column in inspector.get_columns("users")
+                    },
                     "utterance_nullable": {
                         column["name"]: column["nullable"]
                         for column in inspector.get_columns("utterance")
@@ -176,6 +190,117 @@ async def _table_names(
         async with engine.connect() as connection:
             return await connection.run_sync(
                 lambda sync_connection: set(inspect(sync_connection).get_table_names())
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _insert_legacy_users(
+    database_url: str,
+) -> tuple[int, int]:
+    """storage_uuid가 없던 revision에 기존 사용자 두 명을 만든다."""
+
+    engine = create_async_engine(database_url)
+
+    try:
+        async with engine.begin() as connection:
+            first_user_id = await connection.scalar(
+                text(
+                    """
+                    INSERT INTO users (
+                        username,
+                        password_hash,
+                        display_name
+                    )
+                    VALUES (
+                        :username,
+                        :password_hash,
+                        :display_name
+                    )
+                    RETURNING user_id
+                    """
+                ),
+                {
+                    "username": "legacy-user-1",
+                    "password_hash": "hash-1",
+                    "display_name": "Legacy 1",
+                },
+            )
+
+            second_user_id = await connection.scalar(
+                text(
+                    """
+                    INSERT INTO users (
+                        username,
+                        password_hash,
+                        display_name
+                    )
+                    VALUES (
+                        :username,
+                        :password_hash,
+                        :display_name
+                    )
+                    RETURNING user_id
+                    """
+                ),
+                {
+                    "username": "legacy-user-2",
+                    "password_hash": "hash-2",
+                    "display_name": "Legacy 2",
+                },
+            )
+
+            assert first_user_id is not None
+            assert second_user_id is not None
+
+            return (
+                first_user_id,
+                second_user_id,
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _read_storage_uuids(
+    database_url: str,
+) -> list[tuple[int, object]]:
+    """migration 이후 기존 사용자에게 할당된 storage UUID를 읽는다."""
+
+    engine = create_async_engine(database_url)
+
+    try:
+        async with engine.connect() as connection:
+            result = await connection.execute(
+                text(
+                    """
+                    SELECT
+                        user_id,
+                        storage_uuid
+                    FROM users
+                    ORDER BY user_id
+                    """
+                )
+            )
+
+            return list(result.all())
+    finally:
+        await engine.dispose()
+
+
+async def _user_column_names(
+    database_url: str,
+) -> set[str]:
+    """users 테이블의 현재 컬럼 이름을 반환한다."""
+
+    engine = create_async_engine(database_url)
+
+    try:
+        async with engine.connect() as connection:
+            return await connection.run_sync(
+                lambda sync_connection: {
+                    column["name"]
+                    for column in inspect(sync_connection).get_columns("users")
+                }
             )
     finally:
         await engine.dispose()
@@ -253,7 +378,14 @@ def test_empty_database_upgrade_downgrade_upgrade_and_metadata_parity(
             "ck_phrase_usage_stat_usage_count_nonnegative",
         }
 
-        assert second_upgrade["phrase_uniques"] == {"uq_phrase_phrase_code"}
+        assert second_upgrade["users_uniques"] == {
+            "uq_users_storage_uuid",
+            "uq_users_username",
+        }
+
+        assert second_upgrade["phrase_uniques"] == {
+            "uq_phrase_phrase_code",
+        }
 
         assert second_upgrade["video_asset_uniques"] == {
             "uq_video_asset_user_id_idempotency_key"
@@ -327,6 +459,12 @@ def test_empty_database_upgrade_downgrade_upgrade_and_metadata_parity(
             ),
         }
 
+        users_columns = second_upgrade["users_columns"]
+
+        assert users_columns["storage_uuid"]["nullable"] is False
+
+        assert users_columns["storage_uuid"]["type"] == "UUID"
+
         # 비동기 영상 업로드에서는 추론 전에
         # utterance를 생성할 수 있어야 한다.
         utterance_nullable = second_upgrade["utterance_nullable"]
@@ -343,11 +481,75 @@ def test_empty_database_upgrade_downgrade_upgrade_and_metadata_parity(
         asyncio.run(_drop_managed_tables(postgres_url))
 
 
+def test_storage_uuid_migration_backfills_existing_users(
+    postgres_url,
+    monkeypatch,
+):
+    """기존 사용자도 migration 시 서로 다른 storage UUID를 받는다."""
+
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        postgres_url,
+    )
+
+    alembic_config = _alembic_config()
+
+    asyncio.run(_drop_managed_tables(postgres_url))
+
+    try:
+        command.upgrade(
+            alembic_config,
+            STORAGE_UUID_PREVIOUS_REVISION,
+        )
+
+        before_columns = asyncio.run(_user_column_names(postgres_url))
+
+        assert "storage_uuid" not in before_columns
+
+        first_user_id, second_user_id = asyncio.run(_insert_legacy_users(postgres_url))
+
+        command.upgrade(
+            alembic_config,
+            "head",
+        )
+
+        rows = asyncio.run(_read_storage_uuids(postgres_url))
+
+        assert len(rows) == 2
+
+        storage_uuids = {user_id: storage_uuid for user_id, storage_uuid in rows}
+
+        assert first_user_id in storage_uuids
+        assert second_user_id in storage_uuids
+
+        first_uuid = storage_uuids[first_user_id]
+        second_uuid = storage_uuids[second_user_id]
+
+        assert first_uuid is not None
+        assert second_uuid is not None
+
+        UUID(str(first_uuid))
+        UUID(str(second_uuid))
+
+        assert first_uuid != second_uuid
+
+        command.downgrade(
+            alembic_config,
+            STORAGE_UUID_PREVIOUS_REVISION,
+        )
+
+        after_downgrade_columns = asyncio.run(_user_column_names(postgres_url))
+
+        assert "storage_uuid" not in after_downgrade_columns
+    finally:
+        asyncio.run(_drop_managed_tables(postgres_url))
+
+
 def test_alembic_command_does_not_disable_application_loggers(
     postgres_url,
     monkeypatch,
 ):
-    """migration 실행 후에도 애플리케이션 logger를 비활성화하지 않는다."""
+    """migration 실행 전후 애플리케이션 logger를 비활성화하지 않는다."""
 
     monkeypatch.setenv(
         "DATABASE_URL",

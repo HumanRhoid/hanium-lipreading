@@ -1,6 +1,6 @@
 """ERD 명세를 실행 가능한 SQLAlchemy metadata로 검증한다."""
 
-from sqlalchemy import CheckConstraint, UniqueConstraint
+from sqlalchemy import CheckConstraint, UniqueConstraint, Uuid
 
 from src.backend.auth.adapters.repository import User
 from src.backend.core.database import Base
@@ -40,6 +40,7 @@ def test_user_matches_account_contract():
 
     assert set(table.columns.keys()) == {
         "user_id",
+        "storage_uuid",
         "username",
         "password_hash",
         "display_name",
@@ -47,14 +48,25 @@ def test_user_matches_account_contract():
     }
 
     assert table.c.user_id.primary_key is True
+
+    assert isinstance(
+        table.c.storage_uuid.type,
+        Uuid,
+    )
+    assert table.c.storage_uuid.nullable is False
+    assert table.c.storage_uuid.default is not None
+
     assert table.c.username.nullable is False
     assert table.c.password_hash.nullable is False
     assert table.c.display_name.nullable is False
 
-    assert "uq_users_username" in constraint_names(
+    unique_constraints = constraint_names(
         table,
         UniqueConstraint,
     )
+
+    assert "uq_users_username" in unique_constraints
+    assert "uq_users_storage_uuid" in unique_constraints
 
 
 def test_session_matches_erd_contract():
@@ -128,7 +140,7 @@ def test_utterance_supports_async_recognition_contract():
 
     assert table.c.utt_id.primary_key is True
 
-    # 기존 WebSocket 방식과 새 비동기 업로드 방식을 함께 지원한다.
+    # 기존 WebSocket 방식과 신규 비동기 업로드 방식을 함께 지원한다.
     assert table.c.user_id.nullable is True
     assert table.c.session_id.nullable is True
 
