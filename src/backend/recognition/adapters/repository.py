@@ -29,11 +29,13 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.backend.core.database import Base
 from src.backend.recognition.domain import (
     PhraseCategory,
+    Prediction,
     RecognitionMode,
     RecognitionOutput,
 )
 from src.backend.recognition.errors import SessionAlreadyEndedError
 from src.backend.recognition.ports import (
+    InferenceResultRecord,
     VideoAssetRecord,
     VideoAssetSaveResult,
 )
@@ -488,6 +490,31 @@ def _to_video_asset_record(
     )
 
 
+def _to_inference_result_record(
+    utterance: Utterance,
+    phrase_code: str | None,
+) -> InferenceResultRecord | None:
+    """완료된 utterance를 외부 노출용 결과로 변환한다."""
+
+    text = utterance.corrected_text or utterance.raw_text
+
+    if text is None:
+        return None
+
+    return InferenceResultRecord(
+        utterance_id=utterance.utt_id,
+        text=text,
+        phrase_code=phrase_code,
+        confidence=(
+            float(utterance.confidence)
+            if utterance.confidence is not None
+            else None
+        ),
+        model_version=utterance.model_version,
+        created_at=utterance.created_at,
+    )
+
+
 class SQLAlchemyRecognitionRepository:
     """인식 및 영상 메타데이터를 AsyncSession으로 저장한다."""
 
@@ -714,6 +741,105 @@ class SQLAlchemyRecognitionRepository:
             return VideoAssetSaveResult(
                 asset=_to_video_asset_record(asset),
                 created=True,
+            )
+
+    async def save_inference_result(
+        self,
+        *,
+        utterance_id: int,
+        prediction: Prediction,
+        model_version: str | None,
+    ) -> InferenceResultRecord:
+        """Worker 예측을 기존 업로드 utterance에 멱등 저장한다."""
+
+        async with self._session_factory.begin() as db_session:
+            utterance = await db_session.get(
+                Utterance,
+                utterance_id,
+                with_for_update=True,
+            )
+
+            if utterance is None:
+                raise LookupError(
+                    f"업로드 발화 정보를 찾을 수 없습니다: {utterance_id}"
+                )
+
+            if utterance.raw_text is None:
+                phrase_id = None
+
+                if prediction.phrase_code is not None:
+                    phrase_id = await db_session.scalar(
+                        select(Phrase.phrase_id).where(
+                            Phrase.phrase_code == prediction.phrase_code
+                        )
+                    )
+
+                utterance.phrase_id = phrase_id
+                utterance.raw_text = prediction.text
+                utterance.corrected_text = None
+                utterance.confidence = (
+                    Decimal(str(prediction.confidence))
+                    if prediction.confidence is not None
+                    else None
+                )
+                utterance.model_version = model_version
+
+                await db_session.execute(
+                    update(VideoAsset)
+                    .where(VideoAsset.utterance_id == utterance_id)
+                    .values(storage_status="READY")
+                )
+                await db_session.flush()
+
+            phrase_code = None
+
+            if utterance.phrase_id is not None:
+                phrase_code = await db_session.scalar(
+                    select(Phrase.phrase_code).where(
+                        Phrase.phrase_id == utterance.phrase_id
+                    )
+                )
+
+            result = _to_inference_result_record(
+                utterance,
+                phrase_code,
+            )
+
+            if result is None:
+                raise RuntimeError("추론 결과를 저장할 수 없습니다.")
+
+            return result
+
+    async def get_inference_result(
+        self,
+        *,
+        utterance_id: int,
+    ) -> InferenceResultRecord | None:
+        """완료된 업로드 utterance 결과를 조회한다."""
+
+        async with self._session_factory() as db_session:
+            row = (
+                await db_session.execute(
+                    select(
+                        Utterance,
+                        Phrase.phrase_code,
+                    )
+                    .outerjoin(
+                        Phrase,
+                        Phrase.phrase_id == Utterance.phrase_id,
+                    )
+                    .where(Utterance.utt_id == utterance_id)
+                )
+            ).one_or_none()
+
+            if row is None:
+                return None
+
+            utterance, phrase_code = row
+
+            return _to_inference_result_record(
+                utterance,
+                phrase_code,
             )
 
     async def reconcile_abandoned_sessions(

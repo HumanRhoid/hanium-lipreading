@@ -10,6 +10,7 @@ from src.backend.recognition.job_status_service import (
 )
 from src.backend.recognition.ports import (
     InferenceJobRecord,
+    InferenceResultRecord,
     VideoAssetRecord,
 )
 
@@ -87,9 +88,12 @@ class FakeVideoUploadRepository:
         self,
         *,
         asset: VideoAssetRecord | None,
+        result: InferenceResultRecord | None = None,
     ) -> None:
         self.asset = asset
+        self.result = result
         self.requested_video_ids: list[int] = []
+        self.requested_utterance_ids: list[int] = []
 
     async def find_video_asset_by_id(
         self,
@@ -99,6 +103,15 @@ class FakeVideoUploadRepository:
         self.requested_video_ids.append(video_id)
 
         return self.asset
+
+    async def get_inference_result(
+        self,
+        *,
+        utterance_id: int,
+    ) -> InferenceResultRecord | None:
+        self.requested_utterance_ids.append(utterance_id)
+
+        return self.result
 
 
 async def test_get_for_user_returns_owned_job():
@@ -124,11 +137,56 @@ async def test_get_for_user_returns_owned_job():
         job_id=JOB_ID,
     )
 
-    assert result == job
+    assert result is not None
+    assert result.job == job
+    assert result.result is None
 
     assert queue.requested_job_ids == [JOB_ID]
 
     assert repository.requested_video_ids == [job.video_id]
+    assert repository.requested_utterance_ids == []
+
+
+async def test_get_for_user_returns_result_for_succeeded_job():
+    job = make_job()
+    job = InferenceJobRecord(
+        job_id=job.job_id,
+        utterance_id=job.utterance_id,
+        video_id=job.video_id,
+        object_key=job.object_key,
+        mode=job.mode,
+        status="SUCCEEDED",
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+        error_code=None,
+    )
+    inference_result = InferenceResultRecord(
+        utterance_id=job.utterance_id,
+        text="물 주세요",
+        phrase_code="REQUEST_WATER",
+        confidence=0.91,
+        model_version="fake-v1",
+        created_at=CREATED_AT,
+    )
+    queue = FakeInferenceJobQueue(job=job)
+    repository = FakeVideoUploadRepository(
+        asset=make_asset(),
+        result=inference_result,
+    )
+    service = InferenceJobStatusService(
+        repository=repository,
+        inference_job_queue=queue,
+    )
+
+    result = await service.get_for_user(
+        user_id=7,
+        job_id=JOB_ID,
+    )
+
+    assert result is not None
+    assert result.job == job
+    assert result.result == inference_result
+    assert repository.requested_utterance_ids == [job.utterance_id]
 
 
 async def test_get_for_user_returns_none_for_unknown_job():

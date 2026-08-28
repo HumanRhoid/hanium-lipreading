@@ -11,17 +11,17 @@ from typing import Protocol
 import cv2
 import numpy as np
 
-from src.ml.preprocess.normalize import (
-    FIXED_FRAME_COUNT,
-    TARGET_HEIGHT,
-    TARGET_WIDTH,
-)
-
 from src.backend.recognition.ports import (
     InferenceJobRecord,
     InferenceJobWorkerQueue,
     ObjectStorage,
     RecognitionGateway,
+    VideoUploadRepository,
+)
+from src.ml.preprocess.normalize import (
+    FIXED_FRAME_COUNT,
+    TARGET_HEIGHT,
+    TARGET_WIDTH,
 )
 
 logger = logging.getLogger(__name__)
@@ -188,6 +188,7 @@ class InferenceWorker:
         object_storage: ObjectStorage,
         preprocessor: StoredVideoPreprocessor,
         gateway: RecognitionGateway,
+        repository: VideoUploadRepository,
         consumer_name: str,
         block_ms: int = 1000,
         clock: Clock = _utc_now,
@@ -204,6 +205,7 @@ class InferenceWorker:
         self._object_storage = object_storage
         self._preprocessor = preprocessor
         self._gateway = gateway
+        self._repository = repository
         self._consumer_name = consumer_name
         self._block_ms = block_ms
         self._clock = clock
@@ -272,7 +274,7 @@ class InferenceWorker:
         try:
             # 실제 모델 내부 구현은 gateway 뒤쪽의 predictor가 담당한다.
             # Worker 책임은 기존 inference 인터페이스를 호출하는 여기까지다.
-            await self._gateway.predict(
+            prediction = await self._gateway.predict(
                 frames,
                 job.mode,
             )
@@ -287,6 +289,31 @@ class InferenceWorker:
                 job=job,
                 stream_entry_id=delivery.stream_entry_id,
                 error_code="INFERENCE_FAILED",
+            )
+            return True
+
+        try:
+            manifest = self._gateway.manifest
+            await self._repository.save_inference_result(
+                utterance_id=job.utterance_id,
+                prediction=prediction,
+                model_version=(
+                    manifest.bundle_version
+                    if manifest is not None
+                    else None
+                ),
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "추론 Worker 결과 저장 실패: error_type=%s",
+                type(exc).__name__,
+            )
+            await self._finish_failed(
+                job=job,
+                stream_entry_id=delivery.stream_entry_id,
+                error_code="RESULT_PERSISTENCE_FAILED",
             )
             return True
 

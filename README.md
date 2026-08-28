@@ -164,7 +164,15 @@ uv run python scripts/sync_closed_phrases.py
 
 # 4) API를 실행합니다.
 uv run uvicorn src.backend.main:app --reload --no-access-log --ws-max-size 524288
+
+# 5) 별도 터미널에서 업로드 영상 추론 Worker를 실행합니다.
+uv run python -m src.backend.recognition.worker_main
 ```
+
+프런트엔드의 비동기 영상 인식은 `POST /api/v1/recognition/videos`가 반환한
+`job_id`를 `GET /api/v1/inference-jobs/{job_id}`로 조회합니다. 완료 상태는
+`SUCCEEDED`이며 응답의 `result`에 문장, 문구 코드, 신뢰도, 모델 버전과 생성
+시각이 포함됩니다. API와 Worker를 모두 실행해야 Job이 `QUEUED`에서 진행됩니다.
 
 로컬 `.env.example`은 프런트엔드 연동을 즉시 검증할 수 있게 `INFERENCE_BACKEND=fake`를 사용합니다. 가중치와 전처리 asset이 준비되지 않은 운영 환경에서는 `INFERENCE_BACKEND=unavailable`로 두어야 하며, `production` 환경에서 `fake`는 설정 검증 단계에서 거부됩니다. `.env.example`의 `postgres/postgres` 계정은 loopback 로컬 데모 전용이므로 운영에서 재사용하면 안 됩니다.
 
