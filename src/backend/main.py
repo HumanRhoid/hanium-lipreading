@@ -187,7 +187,18 @@ def create_gateway(
             FakeSyncPredictor(),
             max_concurrency=(settings.max_inference_concurrency),
         )
+    if settings.inference_backend == "local":
+        from src.backend.recognition.adapters.local_inference import (
+            LocalSyncPredictor,
+        )
 
+        return BoundedLocalRecognitionGateway(
+            LocalSyncPredictor(
+                model_dir=(settings.model_dir),
+                model_prefix=(settings.model_prefix),
+            ),
+            max_concurrency=(settings.max_inference_concurrency),
+        )
     return UnavailableRecognitionGateway()
 
 

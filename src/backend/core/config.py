@@ -50,7 +50,10 @@ class Settings(BaseSettings):
     inference_backend: Literal[
         "fake",
         "unavailable",
+        "local",
     ] = "unavailable"
+    model_dir: str = "checkpoints"
+    model_prefix: str = "release192"
 
     max_active_sessions: PositiveInt = 1
     max_inference_concurrency: PositiveInt = 1
