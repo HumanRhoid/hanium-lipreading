@@ -10,7 +10,6 @@ data/*
 *.lmdb
 
 # ── 모델 / 체크포인트 (용량 큼 → 드라이브/Releases로) ──
-*.pt
 *.pth
 *.ckpt
 *.onnx
