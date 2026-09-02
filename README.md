@@ -7,7 +7,6 @@
   <img src="https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white" alt="Python 3.11">
   <img src="https://img.shields.io/badge/PyTorch-DL-EE4C2C?logo=pytorch&logoColor=white" alt="PyTorch">
   <img src="https://img.shields.io/badge/Framework-DEEP%20LEARNING-EE4C2C" alt="Deep Learning">
-  <img src="https://img.shields.io/badge/Qwen-LLM%20교정-615CED?logo=qwen&logoColor=white" alt="Qwen LLM">
 </p>
 <p>
   <img src="https://img.shields.io/badge/OpenCV-Vision-5C3EE8?logo=opencv&logoColor=white" alt="OpenCV">
@@ -15,11 +14,11 @@
   <img src="https://img.shields.io/badge/Preprocess-VISION-5C3EE8" alt="Vision">
 </p>
 <p>
-  <img src="https://img.shields.io/badge/Compute-GPU%20(논의중)-181717" alt="Compute TBD">
+  <img src="https://img.shields.io/badge/Compute-Google%20Colab%20GPU-F9AB00?logo=googlecolab&logoColor=white" alt="Colab">
 </p>
 <p>
   <img src="https://img.shields.io/badge/FastAPI-Serving-009688?logo=fastapi&logoColor=white" alt="FastAPI">
-  <img src="https://img.shields.io/badge/Streamlit-Demo-FF4B4B?logo=streamlit&logoColor=white" alt="Streamlit">
+  <img src="https://img.shields.io/badge/React-Web%20App-61DAFB?logo=react&logoColor=black" alt="React">
   <img src="https://img.shields.io/badge/GitHub-Collab-181717?logo=github&logoColor=white" alt="GitHub">
   <img src="https://img.shields.io/badge/Serving-INFRASTRUCTURE-009688" alt="Infrastructure">
 </p>
@@ -30,9 +29,9 @@
 
 **구순을 읽자**는 질병·수술·신경질환 등으로 **목소리를 내기 어려운 환자**가, 카메라 앞에서 **입모양만으로** 필요한 말을 전달할 수 있도록 돕는 한국어 립리딩 비전 AI입니다.
 
-기존 AAC(보완대체의사소통) 도구가 버튼·그림판 터치에 의존하는 것과 달리, 본 프로젝트는 **입술 움직임 영상**을 입력받아 **한국어 문장으로 인식**하고, 그 결과를 화면 텍스트와 **TTS 음성**으로 출력합니다. **수술 직후 회진 상황**이나 **청각장애인과 비수어인의 대화**처럼, 미리 정해두지 않은 **자유로운 대화(개방형)** 를 다루는 것이 목표입니다.
+기존 AAC(보완대체의사소통) 도구가 버튼·그림판 터치에 의존하는 것과 달리, 본 프로젝트는 **입술 움직임 영상**을 입력받아 한국어 문구로 인식하고, 그 결과를 화면 텍스트·확신도와 **TTS 음성**으로 출력합니다.
 
-초심자 4인 팀이 4개월 안에 **동작하는 결과물**을 확보하기 위해 **2트랙**으로 접근합니다. **① 1단계(안전판)**: 고정 문구 폐쇄형 분류로 전처리·학습 파이프라인을 먼저 완성하고, **② 목표**: 사전학습 백본(AV-HuBERT / Auto-AVSR)을 **전이학습**해 **자유 문장(개방형) 인식(seq2seq)** 으로 확장합니다. 인식 결과의 오탈자는 **오픈소스 한국어 LLM(Qwen)** 으로 문맥 후처리 교정합니다.
+**1단계는 완성되었습니다(v1.0.0)**: 인공기도 환자 요구 조사에서 도출한 **필수 의료 문구 15개**를 폐쇄형으로 인식하며, 브라우저 녹화 → 업로드 → 비동기 추론 → 결과 표시까지 전 구간이 실동작합니다. **2단계(로드맵)** 는 동일 인코더 위에서 사전학습 백본(AV-HuBERT 등) 전이학습으로 **자유 문장(seq2seq)** 확장입니다.
 
 ---
 
@@ -40,11 +39,11 @@
 
 | 항목 | 내용 |
 |---|---|
-| **무엇을** | 입모양 영상 → 한국어 **문장** 인식 (개방형 목표) |
+| **무엇을** | 입모양 영상 → 한국어 **필수 의료 문구 15개** 인식 (v1.0.0 완성) |
 | **누구를 위해** | 발성 곤란 환자·회진 상황 / 청각장애인↔비수어인 소통 |
-| **어떻게** | **① 폐쇄형 분류(1단계 안전판)** → **② 자유 문장 seq2seq(목표)** |
-| **언어 교정** | 인식 결과를 **오픈소스 한국어 LLM(Qwen)** 로 문맥 후처리 |
-| **왜 2트랙** | 확실한 결과물(폐쇄형) 확보 + 개방형 도전 → 리스크 분산 |
+| **어떻게** | 3D-Conv+ResNet-18 → BiGRU → 분류, **3시드 앙상블** |
+| **성능** | 화자 분리 교차검증(8화자×3시드=24런) 평균 **0.621** (우연 0.067) |
+| **다음** | 동일 인코더 위 자유 문장 seq2seq 확장 · 의료진 대시보드 |
 
 > 📐 상세 설계: [docs/한이음_립리딩_설계.md](docs/한이음_립리딩_설계.md)
 > ⚠️ 추가 고려사항·리스크: [docs/고려사항.md](docs/고려사항.md)
@@ -54,14 +53,15 @@
 ## 2. 동작 흐름
 
 ```
-[입력 영상/웹캠]
-   → 전처리   프레임화 → 얼굴/입 검출 → 입 ROI 크롭·정렬
-   → 모델     시각 프론트엔드 → 시간 모델(Conformer)
-              ├ ① 폐쇄형: 분류 헤드(FC)
-              └ ② 개방형: CTC/Attention 디코더 → 글자 시퀀스
-   → 후처리   한국어 LLM(Qwen) 문맥 교정 + 신뢰도 판단
-   → 출력     화면 텍스트 / TTS 음성 / 자막
+[브라우저 녹화 영상]
+   → 업로드    POST /recognition/videos (202 + job_id)
+   → 저장/큐   MinIO(영상) · Redis Stream(작업)
+   → Worker    발화 구간 트리밍 → 닮음 변환 정렬 크롭(96×192)
+               → 60프레임 균등 추출·CLAHE → 3D-Conv+ResNet-18 → BiGRU
+               → 3시드 앙상블 → 문구·확신도
+   → 결과      PostgreSQL 저장 → 프런트 폴링 → 텍스트·확신도·TTS
 ```
+자유 문장 seq2seq(CTC/Attention)는 동일 인코더 위 확장 로드맵입니다.
 
 ---
 
@@ -72,19 +72,18 @@
 | **Language** | Python | 3.11 |
 | **DL Framework** | PyTorch | 학습 프레임워크 |
 | **Vision** | OpenCV · MediaPipe | 프레임 처리 · Face Mesh 입술 랜드마크 검출 |
-| **Model** | 3D-Conv + ResNet-18 → Conformer | 시각 프론트엔드 + 시간 모델 |
-| **Head** | ① FC 분류 / ② CTC + Attention | ① 폐쇄형 / ② 개방형 seq2seq |
+| **Model** | 3D-Conv + ResNet-18 → BiGRU(2층) | 시각 인코더 + 시간 모델 (1,431만 파라미터) |
+| **Head** | ① 15문구 분류 (완성) / ② CTC+Attention (로드맵) | 3시드 앙상블 확률 평균 |
 | **Pretrained** | AV-HuBERT / Auto-AVSR | 개방형 백본 전이학습 (자소/음절 토크나이저) |
-| **LM (후처리)** | **Qwen** (오픈소스 한국어 LLM) | 인식 텍스트 문맥 교정 (로컬 추론, 학습 X) |
-| **Video I/O** | ffmpeg | 디코딩 · 25fps 정규화 |
-| **Training** | CrossEntropy(폐쇄형) · CTC+Attention(개방형) · Adam | 학습 손실 |
-| **Metric** | 폐쇄형: 정확도/Top-3 · 개방형: **CER/WER** | 평가 지표 |
+| **Video I/O** | OpenCV | mp4/webm 디코딩 · 발화 구간 트리밍(입 벌어짐) |
+| **Training** | CrossEntropy · AdamW · EMA 0.998 · 시드 3벌 | Colab GPU 학습 |
+| **Metric** | 화자 분리 교차검증 정확도 · 재현 잡음 판정선(±0.042) | 개방형은 CER/WER 예정 |
 | **Tracking** | TensorBoard | 손실 · 지표 기록 |
-| **Serving** | FastAPI / 소켓 스트리밍 | 모델 → 앱 연결 |
-| **Demo UI** | Streamlit / Gradio | 빠른 시연 |
-| **TTS** | pyttsx3 / 클로바 TTS | 인식 문장 음성 출력 (AAC 핵심) |
-| **Data** | AI Hub(문장형) + 자체 녹화 | 한국어 립리딩 (영상↔텍스트 쌍) |
-| **Compute** | 학습 GPU 논의 중 / 보조 Colab | 환경 확정 후 반영 |
+| **Serving** | FastAPI + MinIO + Redis Stream + 전용 Worker | 비동기 업로드·큐·폴링 |
+| **Web App** | React / TypeScript (Vite) | lipread-connect 저장소 |
+| **TTS** | Web Speech API | 브라우저에서 인식 문장 낭독 (AAC 핵심) |
+| **Data** | 자체 녹화 8화자 1,238클립 (15문구 균형) | 화자 분리 원칙 관리 |
+| **Compute** | Google Colab GPU | 시드 3벌 재현 학습 |
 | **Collab** | GitHub + 클라우드 드라이브 | 코드는 git · 데이터는 드라이브 |
 
 ---
@@ -93,19 +92,18 @@
 
 ```
 hanium-lipreading
- ├── src                  # 소스 코드
- │    ├── backend         # FastAPI 도메인 중심 모듈러 모놀리스
- │    ├── preprocess      # 전처리: 영상 → 프레임 → 입 ROI 크롭·정렬
- │    ├── model           # 모델: 백본 + 시간 모델 + 분류 헤드
- │    ├── train           # 학습·평가 루프 (speaker-independent split)
- │    └── infer           # 추론: 오프라인(영상) / 실시간(웹캠)
+ ├── src
+ │    ├── backend         # FastAPI 모듈러 모놀리스 + 추론 Worker (worker_main)
+ │    │    └── recognition/adapters   # DB·MinIO·Redis·LocalSyncPredictor
+ │    └── ml              # 전처리(normalize·lip_crop) · 모델 · 학습 (학습·추론 공유)
+ ├── checkpoints          # 배포 모델 release192_seed{42,1,7}.pt (3시드 앙상블)
  ├── alembic              # PostgreSQL schema migration
- ├── scripts              # 데이터 다운로드·라벨 탐색 등 보조 스크립트
- ├── compose.yaml          # 로컬·테스트 PostgreSQL 16
+ ├── scripts              # dev_up/dev_down(원클릭 기동·종료) · 운영 스크립트
+ ├── compose.yaml         # PostgreSQL · MinIO · Redis (Docker Compose)
  ├── configs              # 하이퍼파라미터·경로 설정
- ├── data                 # (git 제외) AI Hub·녹화·전처리 결과 → data/README.md
- ├── docs                 # 설계서·문서
- └── notebooks            # 실험 노트북
+ ├── data                 # (git 제외) 녹화·전처리 결과 → data/README.md
+ ├── docs                 # 설계서·실험 기록(docs/experiments) · 릴리스 노트
+ └── notebooks            # Colab 학습·릴리스 노트북
 ```
 
 ---
@@ -150,12 +148,24 @@ uv run python -c "import torch; print(torch.cuda.is_available())"   # GPU 사용
 
 Docker와 Docker Compose, Python 3.11, uv가 필요합니다.
 
+**원클릭(Windows)**: 아래 수동 절차를 스크립트 하나로 대신할 수 있습니다.
+
+```powershell
+powershell -File scripts\dev_up.ps1              # 인프라→마이그레이션→API·Worker 창
+powershell -File scripts\dev_up.ps1 -Front <lipread-connect 경로>   # 프론트까지
+powershell -File scripts\dev_down.ps1            # 전체 종료 (데이터 보존)
+```
+
+실모델 추론은 `.env`에 `INFERENCE_BACKEND=local`과 `checkpoints/release192_seed*.pt`
+3개가 필요합니다. DB 주소는 `localhost` 대신 `127.0.0.1`을 권장합니다(Windows에서
+IPv6 폴백으로 첫 연결이 2초 지연되어 health 검사가 실패할 수 있습니다).
+
 ```bash
 # 1) 로컬 설정을 준비합니다. .env는 Git에 커밋하지 않습니다.
 cp .env.example .env
 
-# 2) PostgreSQL 16을 시작하고 Python 의존성을 설치합니다.
-docker compose up -d --wait postgres
+# 2) 인프라(PostgreSQL·MinIO·Redis)를 시작하고 Python 의존성을 설치합니다.
+docker compose up -d --wait postgres minio minio-init redis
 uv sync --locked --dev
 
 # 3) 스키마와 확정된 폐쇄형 문구 데이터를 동기화합니다.
@@ -181,11 +191,11 @@ curl http://127.0.0.1:8000/health/live
 curl http://127.0.0.1:8000/health/ready
 ```
 
-WebSocket은 `ws://127.0.0.1:8000/api/v1/recognition/stream`을 사용합니다. v1은 프레임마다 결과를 보내는 실시간 추론이 아닙니다. `ready` 이후 영상 전체를 전송하고 `stop`을 보내면 서버가 정확히 한 번 추론해 `result(final=true)`와 `stopped`를 보냅니다. 영상은 30~250프레임, 누적 64 MiB까지 허용하며 30프레임을 초과하면 전체 구간에서 모델 입력 30장을 균등 추출합니다. 정확한 시작 명령, JPEG 해상도, timeout과 오류·재연결 정책은 [API 명세](docs/api-spec.md)를 따릅니다.
+WebSocket은 `ws://127.0.0.1:8000/api/v1/recognition/stream`을 사용합니다. v1은 프레임마다 결과를 보내는 실시간 추론이 아닙니다. `ready` 이후 영상 전체를 전송하고 `stop`을 보내면 서버가 정확히 한 번 추론해 `result(final=true)`와 `stopped`를 보냅니다. 영상은 60~250프레임, 누적 64 MiB까지 허용하며 60프레임을 초과하면 전체 구간에서 모델 입력 60장을 균등 추출합니다. 정확한 시작 명령, JPEG 해상도, timeout과 오류·재연결 정책은 [API 명세](docs/api-spec.md)를 따릅니다.
 
 ### 프런트엔드 통합 시 주의사항
 
-별도 `lipread-connect` 프런트엔드는 현재 `1280x720` 카메라 미리보기 중심이며 WebSocket 송수신은 아직 연결되지 않았습니다. 전송 frame은 정확히 `640x360` JPEG로 축소·인코딩하고, `ready` 이후 raw binary로 약 `25fps` 보내야 합니다. 최초 명령 `{"type":"start"}`에는 서버가 `CLOSED`를 기본 적용합니다. Data URL·base64 text를 보내지 않고, `WebSocket.bufferedAmount`가 상한을 넘으면 새 frame을 로컬 queue에 쌓지 말고 건너뜁니다. 이는 브라우저 transport backpressure이고, 서버는 별도로 연결당 최대 250프레임·64 MiB bounded buffer를 강제해 메모리가 무제한 증가하지 않게 합니다. 사용자 종료 시 `{"type":"stop"}`을 보낸 뒤 최종 결과와 `stopped`를 기다립니다. 자세한 순서는 [프런트엔드 통합 기준](docs/api-spec.md#8-lipread-connect-프런트엔드-통합-기준)을 따릅니다.
+별도 `lipread-connect` 프런트엔드는 **영상 업로드 + 폴링 방식으로 통합 완료**되었습니다(MediaRecorder 녹화 → `POST /recognition/videos` → `job_id` 폴링 → 결과·TTS). 아래 WebSocket 경로는 v1 유산으로, 실시간 품질 검사 채널로 개조가 예정되어 있습니다. 전송 frame은 정확히 `640x360` JPEG로 축소·인코딩하고, `ready` 이후 raw binary로 약 `25fps` 보내야 합니다. 최초 명령 `{"type":"start"}`에는 서버가 `CLOSED`를 기본 적용합니다. Data URL·base64 text를 보내지 않고, `WebSocket.bufferedAmount`가 상한을 넘으면 새 frame을 로컬 queue에 쌓지 말고 건너뜁니다. 이는 브라우저 transport backpressure이고, 서버는 별도로 연결당 최대 250프레임·64 MiB bounded buffer를 강제해 메모리가 무제한 증가하지 않게 합니다. 사용자 종료 시 `{"type":"stop"}`을 보낸 뒤 최종 결과와 `stopped`를 기다립니다. 자세한 순서는 [프런트엔드 통합 기준](docs/api-spec.md#8-lipread-connect-프런트엔드-통합-기준)을 따릅니다.
 
 ### 운영 배포
 
@@ -271,25 +281,25 @@ docker compose stop postgres-test
 
 ## 8. 학습과 병행할 작업
 
-> 학습 GPU 환경은 아직 논의 중이다. 한 명이 학습을 돌리는 동안,
+> 학습은 Google Colab GPU에서 수행한다. 한 명이 학습을 돌리는 동안,
 > 나머지는 **GPU 없이 가능한 작업**을 병행해 일정 정체를 막는다.
 
 | 학습 중 병행 작업 | 담당 워크스트림 | GPU 필요? |
 |---|---|---|
 | 자체 녹화 데이터 추가 수집·라벨링 | R1 데이터 | ❌ |
 | 입 ROI 전처리 개선 · 증강 실험 준비 | R2 전처리 | ❌ (CPU) |
-| 추론·데모 UI(Streamlit/TTS) 개발 | R4 시스템 | ❌ |
+| 웹 앱·대시보드 개발 | R4 시스템 | ❌ |
 | 평가 스크립트 · confusion matrix 분석 | R3 모델 | ❌ |
 | 중간평가 서류 · 설계서 갱신 | 전원 | ❌ |
 
 **운영 규칙**
 - 🗓️ 학습 일정·GPU 점유를 사전에 공유 (시간 겹침 방지)
-- 💾 체크포인트(`.pt`)·영상은 git 밖(드라이브/Releases)으로 — 코드·설정·문서만 커밋
+- 💾 배포 체크포인트 3개는 `checkpoints/`에 커밋, **영상·원본 데이터는 git 밖**(드라이브)
 - 🔁 재현성: 시드 고정 · `uv.lock` 고정 · `manifest.csv`로 데이터 버전 관리
 
 ---
 
 ## 9. 데이터 정책 ⚠️ (중요)
 
-- **AI Hub 데이터·영상·가중치는 절대 커밋 금지** (라이선스 + 얼굴/개인정보) — `.gitignore`로 제외됨
+- **얼굴 영상·원본 데이터는 절대 커밋 금지** (개인정보) — `.gitignore`로 제외됨. 서비스 영상 재활용은 사용자 동의 체계로 구분
 - 데이터는 팀 공유 드라이브로 관리 → [data/README.md](data/README.md)
