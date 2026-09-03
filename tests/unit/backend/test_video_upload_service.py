@@ -16,6 +16,9 @@ from src.backend.recognition.errors import (
 )
 from src.backend.recognition.ports import VideoAssetRecord, VideoAssetSaveResult
 from src.backend.recognition.video_upload_service import VideoUploadService
+from src.backend.recognition.video_policy_types import (
+    UserConsentRecord,
+)
 
 FIXED_NOW = datetime(
     2026,
@@ -92,9 +95,23 @@ class FakeVideoUploadRepository:
         self.existing_asset: VideoAssetRecord | None = None
         self.save_result: VideoAssetSaveResult | None = None
         self.save_error: BaseException | None = None
+        self.consent: UserConsentRecord | None = None
 
         self.find_calls: list[dict[str, object]] = []
         self.create_calls: list[dict[str, object]] = []
+
+    async def get_user_consent(
+        self,
+        *,
+        user_id: int,
+    ) -> UserConsentRecord | None:
+        if (
+            self.consent is not None
+            and self.consent.user_id == user_id
+        ):
+            return self.consent
+
+        return None
 
     async def find_video_asset_by_idempotency_key(
         self,
@@ -663,3 +680,69 @@ async def test_open_mode_upload_is_rejected():
         )
 
     assert storage.put_calls == []
+
+
+
+async def test_consented_upload_uses_model_training_storage_policy():
+    repository = FakeVideoUploadRepository()
+    storage = FakeObjectStorage()
+
+    repository.consent = UserConsentRecord(
+        user_id=1,
+        model_training_consent=True,
+        consent_version="2026-09-v1",
+        created_at=FIXED_NOW,
+        updated_at=FIXED_NOW,
+    )
+
+    data = b"consented-training-video"
+
+    checksum = (
+        "16f131bb8a6f283467d429345ce5b9a0"
+        "f19444d72ad83c2c163a3f0a088d31ac"
+    )
+
+    asset = make_asset(
+        object_key=(
+            f"{STORAGE_UUID}/2026/08/"
+            f"{OBJECT_UUID}.webm"
+        ),
+        mime_type="video/webm",
+        data=data,
+        checksum=checksum,
+    )
+
+    repository.save_result = VideoAssetSaveResult(
+        asset=asset,
+        created=True,
+    )
+
+    service = make_service(
+        repository,
+        storage,
+    )
+
+    await service.upload(
+        user_id=1,
+        storage_uuid=STORAGE_UUID,
+        idempotency_key=IDEMPOTENCY_KEY,
+        data=data,
+        content_type="video/webm",
+        mode=RecognitionMode.CLOSED,
+    )
+
+    assert len(repository.create_calls) == 1
+
+    create_call = repository.create_calls[0]
+
+    assert (
+        create_call["storage_purpose"]
+        == "MODEL_TRAINING"
+    )
+
+    assert (
+        create_call["consent_version"]
+        == "2026-09-v1"
+    )
+
+    assert create_call["retention_until"] is None

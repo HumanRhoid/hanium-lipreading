@@ -16,6 +16,10 @@ from src.backend.recognition.inference_worker import (
     InferenceWorker,
     MlStoredVideoPreprocessor,
 )
+from src.backend.recognition.training_candidate_publisher import (
+    TrainingCandidatePublisher,
+    TrainingCandidatePublisherRunner,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +32,19 @@ async def run_worker() -> None:
     repository = SQLAlchemyRecognitionRepository(database.session_factory)
     queue = RedisInferenceJobQueue(settings)
     object_storage = S3ObjectStorage(settings)
+
+    training_candidate_publisher = (
+        TrainingCandidatePublisher(
+            settings=settings,
+            repository=repository,
+        )
+    )
+
+    training_candidate_runner = (
+        TrainingCandidatePublisherRunner(
+            publisher=training_candidate_publisher
+        )
+    )
     gateway = create_gateway(settings)
     consumer_name = f"{socket.gethostname()}-{os.getpid()}"
 
@@ -35,6 +52,7 @@ async def run_worker() -> None:
         await database.ping()
         await object_storage.ensure_bucket()
         await gateway.start()
+        await training_candidate_runner.start()
 
         worker = InferenceWorker(
             queue=queue,
@@ -48,6 +66,8 @@ async def run_worker() -> None:
         logger.info("추론 Worker 시작: consumer=%s", consumer_name)
         await worker.run_forever()
     finally:
+        await training_candidate_runner.close()
+        await training_candidate_publisher.close()
         await gateway.close()
         await queue.close()
         await database.close()

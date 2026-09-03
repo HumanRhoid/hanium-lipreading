@@ -41,6 +41,9 @@ class Settings(BaseSettings):
         repr=False,
     )
 
+    inference_job_terminal_ttl_seconds: PositiveInt = 24 * 60 * 60
+    inference_job_max_retries: PositiveInt = 3
+
     allowed_origins: list[str] = Field(
         default_factory=lambda: [
             "http://localhost:5173",

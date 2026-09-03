@@ -11,6 +11,13 @@ from src.backend.auth.adapters.repository import SQLAlchemyAuthRepository
 from src.backend.auth.api import router as auth_router
 from src.backend.auth.service import AuthService
 from src.backend.core import Settings, SQLAlchemyDatabase
+from src.backend.dashboard.adapters.repository import SQLAlchemyDashboardRepository
+from src.backend.dashboard.api import (
+    DashboardAPIError,
+    dashboard_api_error_handler,
+    router as dashboard_router,
+)
+from src.backend.dashboard.service import DashboardService
 from src.backend.health import router as health_router
 from src.backend.recognition.adapters.inference import (
     BoundedLocalRecognitionGateway,
@@ -51,6 +58,11 @@ from src.backend.recognition.submission_service import (
     RecognitionSubmissionService,
 )
 from src.backend.recognition.upload_api import router as recognition_upload_router
+from src.backend.recognition.video_policy_api import router as video_policy_router
+from src.backend.recognition.video_retention_cleanup import (
+    VideoRetentionCleanupRunner,
+    VideoRetentionCleanupService,
+)
 from src.backend.recognition.video_upload_service import (
     VideoUploadService,
 )
@@ -264,6 +276,20 @@ def create_app(
 
                 app_auth_service = AuthService(repository=(app_auth_repository))
 
+            app_dashboard_repository = None
+            app_dashboard_service = None
+
+            if hasattr(
+                app_database,
+                "session_factory",
+            ):
+                app_dashboard_repository = SQLAlchemyDashboardRepository(
+                    app_database.session_factory
+                )
+                app_dashboard_service = DashboardService(
+                    repository=app_dashboard_repository
+                )
+
             app_object_storage = (
                 object_storage
                 if object_storage is not None
@@ -322,6 +348,37 @@ def create_app(
                 )
             )
 
+            app_retention_cleanup_runner = None
+
+            if hasattr(
+                app_repository,
+                "list_video_assets_due_for_cleanup",
+            ):
+                app_retention_cleanup_service = (
+                    VideoRetentionCleanupService(
+                        repository=app_repository,
+                        object_storage=app_object_storage,
+                    )
+                )
+
+                app_retention_cleanup_runner = (
+                    VideoRetentionCleanupRunner(
+                        service=(
+                            app_retention_cleanup_service
+                        )
+                    )
+                )
+
+                await app_retention_cleanup_runner.start()
+
+                dependency_closes.append(
+                    app_retention_cleanup_runner.close
+                )
+
+            app.state.video_retention_cleanup_runner = (
+                app_retention_cleanup_runner
+            )
+
             app.state.settings = app_settings
 
             app.state.database = app_database
@@ -352,6 +409,10 @@ def create_app(
             app.state.auth_repository = app_auth_repository
 
             app.state.auth_service = app_auth_service
+
+            app.state.dashboard_repository = app_dashboard_repository
+
+            app.state.dashboard_service = app_dashboard_service
 
             await app_gateway.start()
 
@@ -391,6 +452,11 @@ def create_app(
         lifespan=lifespan,
     )
 
+    app.add_exception_handler(
+        DashboardAPIError,
+        dashboard_api_error_handler,
+    )
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=(app_settings.allowed_origins),
@@ -398,6 +464,8 @@ def create_app(
         allow_methods=[
             "GET",
             "POST",
+            "PATCH",
+            "DELETE",
             "OPTIONS",
         ],
         allow_headers=["*"],
@@ -412,6 +480,10 @@ def create_app(
     app.include_router(recognition_upload_router)
 
     app.include_router(inference_job_status_router)
+
+    app.include_router(dashboard_router)
+
+    app.include_router(video_policy_router)
 
     return app
 

@@ -32,6 +32,14 @@ def test_metadata_contains_expected_tables():
         "video_asset",
         "user_consent",
         "phrase_usage_stat",
+
+        "training_candidate",
+        "ward",
+        "staff_ward_access",
+        "patient_profile",
+        "communication_request",
+        "request_event",
+        "request_idempotency",
     }
 
 
@@ -44,6 +52,7 @@ def test_user_matches_account_contract():
         "username",
         "password_hash",
         "display_name",
+        "role",
         "created_at",
     }
 

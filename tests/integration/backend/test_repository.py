@@ -654,3 +654,400 @@ async def test_purge_requires_explicit_target_and_deletes_matching_sessions(
             )
             is not None
         )
+
+
+
+async def test_video_retention_cleanup_candidates_follow_policy(
+    postgres_session_factory,
+):
+    repository = SQLAlchemyRecognitionRepository(
+        postgres_session_factory
+    )
+
+    user_id = await _create_user(
+        postgres_session_factory,
+        display_name="retention-user",
+    )
+
+    now = datetime.now(UTC)
+
+    ready = await repository.create_or_get_video_asset(
+        user_id=user_id,
+        idempotency_key=(
+            "91000000-0000-4000-8000-000000000001"
+        ),
+        object_key="retention/ready.webm",
+        original_mime_type="video/webm",
+        size_bytes=100,
+        checksum="1" * 64,
+        storage_purpose="TEMPORARY_INFERENCE",
+        consent_version=None,
+        retention_until=now + timedelta(hours=23),
+    )
+
+    expired = await repository.create_or_get_video_asset(
+        user_id=user_id,
+        idempotency_key=(
+            "91000000-0000-4000-8000-000000000002"
+        ),
+        object_key="retention/expired.webm",
+        original_mime_type="video/webm",
+        size_bytes=100,
+        checksum="2" * 64,
+        storage_purpose="TEMPORARY_INFERENCE",
+        consent_version=None,
+        retention_until=now - timedelta(seconds=1),
+    )
+
+    active = await repository.create_or_get_video_asset(
+        user_id=user_id,
+        idempotency_key=(
+            "91000000-0000-4000-8000-000000000003"
+        ),
+        object_key="retention/active.webm",
+        original_mime_type="video/webm",
+        size_bytes=100,
+        checksum="3" * 64,
+        storage_purpose="TEMPORARY_INFERENCE",
+        consent_version=None,
+        retention_until=now + timedelta(hours=23),
+    )
+
+    training = await repository.create_or_get_video_asset(
+        user_id=user_id,
+        idempotency_key=(
+            "91000000-0000-4000-8000-000000000004"
+        ),
+        object_key="retention/training.webm",
+        original_mime_type="video/webm",
+        size_bytes=100,
+        checksum="4" * 64,
+        storage_purpose="MODEL_TRAINING",
+        consent_version="2026-09-v1",
+        retention_until=None,
+    )
+
+    async with postgres_session_factory.begin() as session:
+        ready_row = await session.get(
+            VideoAsset,
+            ready.asset.video_id,
+        )
+
+        training_row = await session.get(
+            VideoAsset,
+            training.asset.video_id,
+        )
+
+        assert ready_row is not None
+        assert training_row is not None
+
+        ready_row.storage_status = "READY"
+        training_row.storage_status = "READY"
+
+    candidates = (
+        await repository.list_video_assets_due_for_cleanup(
+            now=now,
+            limit=100,
+        )
+    )
+
+    candidate_ids = {
+        candidate.video_id
+        for candidate in candidates
+    }
+
+    assert ready.asset.video_id in candidate_ids
+    assert expired.asset.video_id in candidate_ids
+
+    assert active.asset.video_id not in candidate_ids
+
+    # Training-purpose videos are never selected by the
+    # automatic temporary-video retention cleanup.
+    assert training.asset.video_id not in candidate_ids
+
+
+
+async def test_inference_result_records_phrase_usage_exactly_once(
+    postgres_session_factory,
+):
+    from datetime import UTC, datetime, timedelta
+    from uuid import uuid4
+
+    from src.backend.recognition.domain import (
+        PhraseCategory,
+        Prediction,
+    )
+
+    repository = SQLAlchemyRecognitionRepository(
+        postgres_session_factory
+    )
+
+    user_id = await _create_user(
+        postgres_session_factory,
+        display_name="personalization-user",
+    )
+
+    phrase_code = "PERSONALIZATION_REQUEST_HELP"
+
+    await repository.sync_phrases(
+        [
+            (
+                phrase_code,
+                "?????",
+                PhraseCategory.REQUEST,
+            )
+        ]
+    )
+
+    now = datetime.now(UTC)
+
+    saved = await repository.create_or_get_video_asset(
+        user_id=user_id,
+        idempotency_key=str(uuid4()),
+        object_key="personalization/input.webm",
+        original_mime_type="video/webm",
+        size_bytes=100,
+        checksum="9" * 64,
+        storage_purpose="TEMPORARY_INFERENCE",
+        consent_version=None,
+        retention_until=now + timedelta(hours=24),
+    )
+
+    prediction = Prediction(
+        text="?????",
+        confidence=0.9,
+        phrase_code=phrase_code,
+    )
+
+    await repository.save_inference_result(
+        utterance_id=saved.asset.utterance_id,
+        prediction=prediction,
+        model_version="personalization-test",
+    )
+
+    # Worker retry / duplicate persistence must not double-count.
+    await repository.save_inference_result(
+        utterance_id=saved.asset.utterance_id,
+        prediction=prediction,
+        model_version="personalization-test",
+    )
+
+    stats = await repository.list_phrase_usage_stats(
+        user_id=user_id
+    )
+
+    matching = [
+        stat
+        for stat in stats
+        if stat.phrase_code == phrase_code
+    ]
+
+    assert len(matching) == 1
+
+    usage = matching[0]
+
+    assert usage.usage_count == 1
+    assert usage.accepted_count == 0
+    assert usage.corrected_count == 0
+    assert usage.last_used_at is not None
+
+
+
+async def test_training_candidate_is_durable_idempotent_and_consent_gated(
+    postgres_session_factory,
+):
+    from datetime import UTC, datetime, timedelta
+    from uuid import uuid4
+
+    from sqlalchemy import select
+
+    from src.backend.recognition.adapters.repository import (
+        TrainingCandidate,
+    )
+    from src.backend.recognition.domain import (
+        PhraseCategory,
+        Prediction,
+    )
+
+    repository = SQLAlchemyRecognitionRepository(
+        postgres_session_factory
+    )
+
+    phrase_code = "TRAINING_REQUEST_HELP"
+
+    await repository.sync_phrases(
+        [
+            (
+                phrase_code,
+                "?????",
+                PhraseCategory.REQUEST,
+            )
+        ]
+    )
+
+    user_id = await _create_user(
+        postgres_session_factory,
+        display_name="training-consent-user",
+    )
+
+    await repository.upsert_user_consent(
+        user_id=user_id,
+        model_training_consent=True,
+        consent_version="2026-09-v1",
+    )
+
+    now = datetime.now(UTC)
+
+    saved = await repository.create_or_get_video_asset(
+        user_id=user_id,
+        idempotency_key=str(uuid4()),
+        object_key="training/consented.webm",
+        original_mime_type="video/webm",
+        size_bytes=100,
+        checksum="7" * 64,
+        storage_purpose="MODEL_TRAINING",
+        consent_version="2026-09-v1",
+        retention_until=None,
+    )
+
+    prediction = Prediction(
+        text="?????",
+        confidence=0.91,
+        phrase_code=phrase_code,
+    )
+
+    await repository.save_inference_result(
+        utterance_id=saved.asset.utterance_id,
+        prediction=prediction,
+        model_version="bundle-v1",
+    )
+
+    # Worker/result-persistence retry must not duplicate.
+    await repository.save_inference_result(
+        utterance_id=saved.asset.utterance_id,
+        prediction=prediction,
+        model_version="bundle-v1",
+    )
+
+    async with postgres_session_factory() as session:
+        candidates = list(
+            await session.scalars(
+                select(TrainingCandidate).where(
+                    TrainingCandidate.user_id
+                    == user_id
+                )
+            )
+        )
+
+    assert len(candidates) == 1
+
+    candidate = candidates[0]
+
+    assert candidate.utterance_id == (
+        saved.asset.utterance_id
+    )
+
+    assert candidate.video_id == saved.asset.video_id
+    assert candidate.status == "UNLABELED"
+    assert candidate.model_version == "bundle-v1"
+
+    assert (
+        candidate.predicted_phrase_code
+        == phrase_code
+    )
+
+    assert float(candidate.confidence) == pytest.approx(
+        0.91
+    )
+
+    assert candidate.published_at is None
+
+    object_key = (
+        await repository.get_training_candidate_object_key(
+            sample_id=candidate.sample_id
+        )
+    )
+
+    assert object_key == "training/consented.webm"
+
+    pending = (
+        await repository.list_unpublished_training_candidates(
+            limit=100
+        )
+    )
+
+    assert [
+        item.sample_id
+        for item in pending
+    ] == [
+        candidate.sample_id
+    ]
+
+    # Withdrawal durably excludes the candidate.
+    await repository.upsert_user_consent(
+        user_id=user_id,
+        model_training_consent=False,
+        consent_version="2026-09-v1",
+    )
+
+    async with postgres_session_factory() as session:
+        withdrawn = await session.get(
+            TrainingCandidate,
+            candidate.sample_id,
+        )
+
+    assert withdrawn is not None
+    assert withdrawn.status == "REJECTED"
+
+    assert (
+        await repository.get_training_candidate_object_key(
+            sample_id=candidate.sample_id
+        )
+        is None
+    )
+
+    pending_after_withdrawal = (
+        await repository.list_unpublished_training_candidates(
+            limit=100
+        )
+    )
+
+    assert all(
+        item.sample_id != candidate.sample_id
+        for item in pending_after_withdrawal
+    )
+
+    # A temporary/non-consented inference must never become
+    # a training candidate.
+    other_user_id = await _create_user(
+        postgres_session_factory,
+        display_name="training-nonconsent-user",
+    )
+
+    temporary = await repository.create_or_get_video_asset(
+        user_id=other_user_id,
+        idempotency_key=str(uuid4()),
+        object_key="training/temporary.webm",
+        original_mime_type="video/webm",
+        size_bytes=100,
+        checksum="8" * 64,
+        storage_purpose="TEMPORARY_INFERENCE",
+        consent_version=None,
+        retention_until=now + timedelta(hours=24),
+    )
+
+    await repository.save_inference_result(
+        utterance_id=temporary.asset.utterance_id,
+        prediction=prediction,
+        model_version="bundle-v1",
+    )
+
+    async with postgres_session_factory() as session:
+        unexpected = await session.scalar(
+            select(TrainingCandidate).where(
+                TrainingCandidate.utterance_id
+                == temporary.asset.utterance_id
+            )
+        )
+
+    assert unexpected is None

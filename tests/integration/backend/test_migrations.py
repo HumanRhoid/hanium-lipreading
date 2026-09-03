@@ -26,6 +26,13 @@ MANAGED_TABLES = {
     "video_asset",
     "user_consent",
     "phrase_usage_stat",
+    "ward",
+    "patient_profile",
+    "staff_ward_access",
+    "communication_request",
+    "request_event",
+    "request_idempotency",
+    "training_candidate",
 }
 
 STORAGE_UUID_PREVIOUS_REVISION = "bf490b4f7d1d"
@@ -37,30 +44,141 @@ def _alembic_config() -> Config:
     return Config(str(PROJECT_ROOT / "alembic.ini"))
 
 
-async def _drop_managed_tables(database_url: str) -> None:
-    """테스트 DB에서 이 서비스가 소유한 테이블만 명시적으로 제거한다."""
+async def _drop_managed_tables(
+    database_url: str,
+) -> None:
+    """??? DB?? ? ???? ??? ???? ????? ????."""
 
     engine = create_async_engine(database_url)
 
     try:
         async with engine.begin() as connection:
-            actual_database = await connection.scalar(text("SELECT current_database()"))
-
-            if actual_database != make_url(database_url).database:
-                raise RuntimeError("연결된 DB가 TEST_DATABASE_URL과 일치하지 않습니다.")
-
-            # FK 의존성이 있는 테이블부터 제거한다.
-            await connection.execute(
-                text("DROP TABLE IF EXISTS phrase_usage_stat CASCADE")
+            actual_database = await connection.scalar(
+                text("SELECT current_database()")
             )
-            await connection.execute(text("DROP TABLE IF EXISTS user_consent CASCADE"))
-            await connection.execute(text("DROP TABLE IF EXISTS video_asset CASCADE"))
-            await connection.execute(text("DROP TABLE IF EXISTS login_session CASCADE"))
-            await connection.execute(text("DROP TABLE IF EXISTS utterance CASCADE"))
-            await connection.execute(text("DROP TABLE IF EXISTS users CASCADE"))
-            await connection.execute(text("DROP TABLE IF EXISTS phrase CASCADE"))
-            await connection.execute(text('DROP TABLE IF EXISTS "session" CASCADE'))
-            await connection.execute(text("DROP TABLE IF EXISTS alembic_version"))
+
+            if (
+                actual_database
+                != make_url(database_url).database
+            ):
+                raise RuntimeError(
+                    "??? DB? TEST_DATABASE_URL? "
+                    "???? ????."
+                )
+
+            # FK ?? -> ?? ??.
+            await connection.execute(
+                text(
+                    "DROP TABLE IF EXISTS "
+                    "request_idempotency CASCADE"
+                )
+            )
+
+            await connection.execute(
+                text(
+                    "DROP TABLE IF EXISTS "
+                    "request_event CASCADE"
+                )
+            )
+
+            await connection.execute(
+                text(
+                    "DROP TABLE IF EXISTS "
+                    "communication_request CASCADE"
+                )
+            )
+
+            await connection.execute(
+                text(
+                    "DROP TABLE IF EXISTS "
+                    "staff_ward_access CASCADE"
+                )
+            )
+
+            await connection.execute(
+                text(
+                    "DROP TABLE IF EXISTS "
+                    "patient_profile CASCADE"
+                )
+            )
+
+            await connection.execute(
+                text(
+                    "DROP TABLE IF EXISTS "
+                    "ward CASCADE"
+                )
+            )
+
+            await connection.execute(
+                text(
+                    "DROP TABLE IF EXISTS "
+                    "training_candidate CASCADE"
+                )
+            )
+
+            await connection.execute(
+                text(
+                    "DROP TABLE IF EXISTS "
+                    "phrase_usage_stat CASCADE"
+                )
+            )
+
+            await connection.execute(
+                text(
+                    "DROP TABLE IF EXISTS "
+                    "user_consent CASCADE"
+                )
+            )
+
+            await connection.execute(
+                text(
+                    "DROP TABLE IF EXISTS "
+                    "video_asset CASCADE"
+                )
+            )
+
+            await connection.execute(
+                text(
+                    "DROP TABLE IF EXISTS "
+                    "login_session CASCADE"
+                )
+            )
+
+            await connection.execute(
+                text(
+                    "DROP TABLE IF EXISTS "
+                    "utterance CASCADE"
+                )
+            )
+
+            await connection.execute(
+                text(
+                    "DROP TABLE IF EXISTS "
+                    "users CASCADE"
+                )
+            )
+
+            await connection.execute(
+                text(
+                    "DROP TABLE IF EXISTS "
+                    "phrase CASCADE"
+                )
+            )
+
+            await connection.execute(
+                text(
+                    'DROP TABLE IF EXISTS '
+                    '"session" CASCADE'
+                )
+            )
+
+            await connection.execute(
+                text(
+                    "DROP TABLE IF EXISTS "
+                    "alembic_version"
+                )
+            )
+
     finally:
         await engine.dispose()
 
