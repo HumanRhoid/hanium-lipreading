@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Identity,
@@ -27,6 +28,10 @@ class User(Base):
     __table_args__ = (
         UniqueConstraint("username"),
         UniqueConstraint("storage_uuid"),
+        CheckConstraint(
+            "role IN ('PATIENT', 'STAFF')",
+            name="role",
+        ),
     )
 
     user_id: Mapped[int] = mapped_column(
@@ -54,6 +59,13 @@ class User(Base):
     display_name: Mapped[str] = mapped_column(
         String(50),
         nullable=False,
+    )
+
+    role: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="PATIENT",
+        server_default="PATIENT",
     )
 
     created_at: Mapped[datetime] = mapped_column(

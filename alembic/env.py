@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 from src.backend.auth.adapters import repository as auth_repository  # noqa: F401
 from src.backend.core import Base, Settings
+from src.backend.dashboard import models as dashboard_models  # noqa: F401
 from src.backend.recognition.adapters import repository  # noqa: F401
 
 config = context.config

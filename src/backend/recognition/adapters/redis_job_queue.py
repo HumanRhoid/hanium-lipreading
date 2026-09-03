@@ -17,10 +17,15 @@ from src.backend.recognition.ports import (
 )
 
 INFERENCE_JOB_STREAM: Final = "stream:inference:jobs"
+INFERENCE_JOB_DEAD_LETTER_STREAM: Final = "stream:inference:dead-letter"
 INFERENCE_JOB_CONSUMER_GROUP: Final = "inference-workers"
 
 _JOB_KEY_PREFIX: Final = "inference:job:"
 _VIDEO_JOB_KEY_PREFIX: Final = "inference:video:"
+_VIDEO_JOB_KEY_SUFFIX: Final = ":job"
+
+DEFAULT_INFERENCE_JOB_TERMINAL_TTL_SECONDS: Final = 24 * 60 * 60
+DEFAULT_INFERENCE_JOB_MAX_RETRIES: Final = 3
 
 _VALID_JOB_STATUSES: Final = frozenset(
     {
@@ -110,14 +115,20 @@ if redis.call("EXISTS", KEYS[1]) == 0 then
     return redis.error_reply("JOB_NOT_FOUND")
 end
 
-local current_status = redis.call("HGET", KEYS[1], "status")
+local current_status = redis.call(
+    "HGET",
+    KEYS[1],
+    "status"
+)
 
 if not current_status then
     return redis.error_reply("JOB_STATUS_MISSING")
 end
 
 if current_status ~= "PROCESSING" then
-    return redis.error_reply("INVALID_STATUS_TRANSITION:" .. current_status)
+    return redis.error_reply(
+        "INVALID_STATUS_TRANSITION:" .. current_status
+    )
 end
 
 redis.call(
@@ -128,7 +139,211 @@ redis.call(
     "error_code", ARGV[3]
 )
 
+local ttl_seconds = tonumber(ARGV[4])
+
+-- Settings uses PositiveInt, so this is defensive only.
+if ttl_seconds and ttl_seconds > 0 then
+    redis.call(
+        "EXPIRE",
+        KEYS[1],
+        ttl_seconds
+    )
+
+    local video_id = redis.call(
+        "HGET",
+        KEYS[1],
+        "video_id"
+    )
+
+    if video_id then
+        local video_job_key = ARGV[5] .. video_id .. ARGV[6]
+
+        local mapped_job_id = redis.call(
+            "GET",
+            video_job_key
+        )
+
+        -- Do not expire a mapping that was somehow replaced
+        -- by another Job.
+        if mapped_job_id == ARGV[7] then
+            redis.call(
+                "EXPIRE",
+                video_job_key,
+                ttl_seconds
+            )
+        end
+    end
+end
+
 return ARGV[1]
+"""
+
+
+_HANDLE_FAILURE_SCRIPT: Final = """
+if redis.call("EXISTS", KEYS[1]) == 0 then
+    return redis.error_reply("JOB_NOT_FOUND")
+end
+
+local current_status = redis.call(
+    "HGET",
+    KEYS[1],
+    "status"
+)
+
+if not current_status then
+    return redis.error_reply("JOB_STATUS_MISSING")
+end
+
+if current_status ~= "PROCESSING" then
+    return redis.error_reply(
+        "INVALID_STATUS_TRANSITION:" .. current_status
+    )
+end
+
+local retry_count = tonumber(
+    redis.call(
+        "HGET",
+        KEYS[1],
+        "retry_count"
+    ) or "0"
+)
+
+local max_retries = tonumber(ARGV[3]) or 0
+
+local job_id = redis.call(
+    "HGET",
+    KEYS[1],
+    "job_id"
+)
+
+local utterance_id = redis.call(
+    "HGET",
+    KEYS[1],
+    "utterance_id"
+)
+
+local video_id = redis.call(
+    "HGET",
+    KEYS[1],
+    "video_id"
+)
+
+local object_key = redis.call(
+    "HGET",
+    KEYS[1],
+    "object_key"
+)
+
+local mode = redis.call(
+    "HGET",
+    KEYS[1],
+    "mode"
+)
+
+local created_at = redis.call(
+    "HGET",
+    KEYS[1],
+    "created_at"
+)
+
+if (
+    not job_id
+    or not utterance_id
+    or not video_id
+    or not object_key
+    or not mode
+    or not created_at
+) then
+    return redis.error_reply("JOB_DATA_MISSING")
+end
+
+if retry_count < max_retries then
+    local next_retry_count = retry_count + 1
+
+    redis.call(
+        "HSET",
+        KEYS[1],
+        "status", "QUEUED",
+        "updated_at", ARGV[1],
+        "error_code", ARGV[2],
+        "retry_count", tostring(next_retry_count)
+    )
+
+    redis.call(
+        "XADD",
+        KEYS[2],
+        "*",
+        "job_id", job_id,
+        "utterance_id", utterance_id,
+        "video_id", video_id,
+        "object_key", object_key,
+        "mode", mode,
+        "created_at", created_at
+    )
+
+    return {
+        "RETRY",
+        tostring(next_retry_count)
+    }
+end
+
+redis.call(
+    "HSET",
+    KEYS[1],
+    "status", "FAILED",
+    "updated_at", ARGV[1],
+    "error_code", ARGV[2],
+    "retry_count", tostring(retry_count)
+)
+
+redis.call(
+    "XADD",
+    KEYS[3],
+    "*",
+    "job_id", job_id,
+    "utterance_id", utterance_id,
+    "video_id", video_id,
+    "object_key", object_key,
+    "mode", mode,
+    "created_at", created_at,
+    "error_code", ARGV[2],
+    "retry_count", tostring(retry_count),
+    "failed_at", ARGV[1]
+)
+
+local ttl_seconds = tonumber(ARGV[4])
+
+if ttl_seconds and ttl_seconds > 0 then
+    redis.call(
+        "EXPIRE",
+        KEYS[1],
+        ttl_seconds
+    )
+
+    local video_job_key = (
+        ARGV[5]
+        .. video_id
+        .. ARGV[6]
+    )
+
+    local mapped_job_id = redis.call(
+        "GET",
+        video_job_key
+    )
+
+    if mapped_job_id == ARGV[7] then
+        redis.call(
+            "EXPIRE",
+            video_job_key,
+            ttl_seconds
+        )
+    end
+end
+
+return {
+    "DLQ",
+    tostring(retry_count)
+}
 """
 
 
@@ -142,6 +357,21 @@ class RedisInferenceJobQueue:
         self._redis = Redis.from_url(
             settings.redis_url,
             decode_responses=True,
+        )
+
+        self._terminal_ttl_seconds = int(
+            getattr(
+                settings,
+                "inference_job_terminal_ttl_seconds",
+                DEFAULT_INFERENCE_JOB_TERMINAL_TTL_SECONDS,
+            )
+        )
+        self._max_retries = int(
+            getattr(
+                settings,
+                "inference_job_max_retries",
+                0,
+            )
         )
 
     async def ping(
@@ -300,19 +530,152 @@ class RedisInferenceJobQueue:
         error_code: str,
         updated_at: datetime,
     ) -> InferenceJobRecord:
-        """PROCESSING Job을 FAILED로 원자적으로 전환한다."""
+        """??? ???? ?? 3? ??? ? FAILED/DLQ ????."""
 
         error_code = error_code.strip()
 
         if not error_code:
-            raise ValueError("error_code는 비어 있을 수 없습니다.")
+            raise ValueError(
+                "error_code? ?? ?? ? ????."
+            )
 
-        return await self._transition_from_processing(
-            job_id=job_id,
-            target_status="FAILED",
-            updated_at=updated_at,
-            error_code=error_code,
+        canonical_job_id = self._canonical_job_id(
+            job_id
         )
+
+        updated_at_text = self._serialize_datetime(
+            updated_at
+        )
+
+        max_retries = int(
+            getattr(
+                self,
+                "_max_retries",
+                0,
+            )
+        )
+
+        terminal_ttl_seconds = int(
+            getattr(
+                self,
+                "_terminal_ttl_seconds",
+                DEFAULT_INFERENCE_JOB_TERMINAL_TTL_SECONDS,
+            )
+        )
+
+        try:
+            raw_result = await self._redis.eval(
+                _HANDLE_FAILURE_SCRIPT,
+                3,
+                self._job_key(canonical_job_id),
+                INFERENCE_JOB_STREAM,
+                INFERENCE_JOB_DEAD_LETTER_STREAM,
+                updated_at_text,
+                error_code,
+                max_retries,
+                terminal_ttl_seconds,
+                _VIDEO_JOB_KEY_PREFIX,
+                _VIDEO_JOB_KEY_SUFFIX,
+                canonical_job_id,
+            )
+        except ResponseError as exc:
+            message = str(exc)
+
+            if "JOB_NOT_FOUND" in message:
+                raise RuntimeError(
+                    "?? ??? ?? Job? ?? ? ????."
+                ) from exc
+
+            if "JOB_STATUS_MISSING" in message:
+                raise RuntimeError(
+                    "Redis ?? Job? status? ????."
+                ) from exc
+
+            if "JOB_DATA_MISSING" in message:
+                raise RuntimeError(
+                    "Redis ?? Job ???? ??????."
+                ) from exc
+
+            if "INVALID_STATUS_TRANSITION:" in message:
+                raise RuntimeError(
+                    "PROCESSING ??? ?? Job? "
+                    "?? ??? ? ????."
+                ) from exc
+
+            raise
+
+        # Backward compatibility for older isolated test doubles.
+        if str(raw_result) == "FAILED":
+            action = "DLQ"
+        else:
+            if (
+                not isinstance(
+                    raw_result,
+                    (
+                        list,
+                        tuple,
+                    ),
+                )
+                or len(raw_result) != 2
+            ):
+                raise RuntimeError(
+                    "Redis ?? Job ?? ?? ?? ??? "
+                    "???? ????."
+                )
+
+            action = str(raw_result[0])
+
+            if action not in {
+                "RETRY",
+                "DLQ",
+            }:
+                raise RuntimeError(
+                    "Redis ?? Job ?? ?? ??? "
+                    "???? ????."
+                )
+
+            try:
+                retry_count = int(
+                    raw_result[1]
+                )
+            except (
+                TypeError,
+                ValueError,
+            ) as exc:
+                raise RuntimeError(
+                    "Redis ?? Job retry_count? "
+                    "???? ????."
+                ) from exc
+
+            if retry_count < 0:
+                raise RuntimeError(
+                    "Redis ?? Job retry_count? "
+                    "???? ????."
+                )
+
+        job = await self.get_job(
+            job_id=canonical_job_id
+        )
+
+        if job is None:
+            raise RuntimeError(
+                "?? ?? ? ?? Job? "
+                "??? ? ????."
+            )
+
+        expected_status = (
+            "QUEUED"
+            if action == "RETRY"
+            else "FAILED"
+        )
+
+        if job.status != expected_status:
+            raise RuntimeError(
+                "?? Job ?? ?? ??? "
+                "???? ???? ?????."
+            )
+
+        return job
 
     async def _transition_from_processing(
         self,
@@ -335,6 +698,14 @@ class RedisInferenceJobQueue:
                 target_status,
                 updated_at_text,
                 error_code,
+                getattr(
+                    self,
+                    "_terminal_ttl_seconds",
+                    DEFAULT_INFERENCE_JOB_TERMINAL_TTL_SECONDS,
+                ),
+                _VIDEO_JOB_KEY_PREFIX,
+                _VIDEO_JOB_KEY_SUFFIX,
+                canonical_job_id,
             )
         except ResponseError as exc:
             message = str(exc)
@@ -867,4 +1238,8 @@ class RedisInferenceJobQueue:
     def _video_job_key(
         video_id: int,
     ) -> str:
-        return f"{_VIDEO_JOB_KEY_PREFIX}{video_id}:job"
+        return (
+            f"{_VIDEO_JOB_KEY_PREFIX}"
+            f"{video_id}"
+            f"{_VIDEO_JOB_KEY_SUFFIX}"
+        )

@@ -118,7 +118,30 @@ class VideoUploadService:
             extension=extension,
         )
 
+        storage_purpose = "TEMPORARY_INFERENCE"
+        consent_version = None
         retention_until = now + TEMPORARY_VIDEO_RETENTION
+
+        # The existing repository may expose persisted training
+        # consent. Older/fake repositories remain compatible.
+        consent_getter = getattr(
+            self._repository,
+            "get_user_consent",
+            None,
+        )
+
+        if consent_getter is not None:
+            consent = await consent_getter(
+                user_id=user_id
+            )
+
+            if (
+                consent is not None
+                and consent.model_training_consent
+            ):
+                storage_purpose = "MODEL_TRAINING"
+                consent_version = consent.consent_version
+                retention_until = None
 
         await self._object_storage.ensure_bucket()
 
@@ -137,8 +160,8 @@ class VideoUploadService:
                 original_mime_type=mime_type,
                 size_bytes=len(data),
                 checksum=checksum,
-                storage_purpose="TEMPORARY_INFERENCE",
-                consent_version=None,
+                storage_purpose=storage_purpose,
+                consent_version=consent_version,
                 retention_until=retention_until,
             )
         except BaseException:
