@@ -9,7 +9,6 @@ from src.backend.recognition.video_policy_types import (
     VideoPolicyAssetRecord,
 )
 
-
 Clock = Callable[[], datetime]
 
 

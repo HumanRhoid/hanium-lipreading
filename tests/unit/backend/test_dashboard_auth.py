@@ -14,7 +14,6 @@ from src.backend.dashboard.api import (
 )
 from src.backend.dashboard.service import ResourceNotFoundError
 
-
 SESSION_TOKEN = "dashboard-test-session"
 
 

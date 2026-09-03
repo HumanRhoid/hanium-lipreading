@@ -12,7 +12,6 @@ from src.backend.recognition.adapters.redis_job_queue import (
     RedisInferenceJobQueue,
 )
 
-
 pytestmark = pytest.mark.asyncio
 
 NOW = datetime(

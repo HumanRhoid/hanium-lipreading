@@ -9,7 +9,6 @@ from src.backend.dashboard.adapters.repository import (
 )
 from src.backend.dashboard.service import DashboardService
 
-
 NOW = datetime(2026, 9, 2, 8, 42, tzinfo=UTC)
 
 

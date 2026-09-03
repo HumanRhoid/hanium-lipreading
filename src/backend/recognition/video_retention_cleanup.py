@@ -11,7 +11,6 @@ from src.backend.recognition.video_policy_service import (
     VideoPolicyService,
 )
 
-
 logger = logging.getLogger(__name__)
 
 Clock = Callable[[], datetime]

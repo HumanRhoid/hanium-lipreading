@@ -5,13 +5,12 @@ from datetime import UTC, datetime
 
 import pytest
 
-from src.backend.recognition.video_retention_cleanup import (
-    VideoRetentionCleanupService,
-)
 from src.backend.recognition.video_policy_types import (
     VideoPolicyAssetRecord,
 )
-
+from src.backend.recognition.video_retention_cleanup import (
+    VideoRetentionCleanupService,
+)
 
 pytestmark = pytest.mark.asyncio
 

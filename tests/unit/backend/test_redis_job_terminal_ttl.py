@@ -7,10 +7,8 @@ import pytest
 
 from src.backend.core.config import Settings
 from src.backend.recognition.adapters.redis_job_queue import (
-    _TRANSITION_FROM_PROCESSING_SCRIPT,
     RedisInferenceJobQueue,
 )
-
 
 pytestmark = pytest.mark.asyncio
 

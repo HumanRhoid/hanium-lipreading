@@ -16,28 +16,27 @@ from fastapi.responses import JSONResponse
 from src.backend.auth.adapters.repository import User
 from src.backend.auth.service import InvalidSessionError
 from src.backend.dashboard.schemas import (
-    PatientRequestHistoryResponse,
-    PatientDetailResponse,
-    PatientBoardResponse,
-    CompleteRequest,
-    RequestDetailResponse,
     AcknowledgeRequest,
+    CompleteRequest,
     DashboardSummaryResponse,
+    PatientBoardResponse,
+    PatientDetailResponse,
+    PatientRequestHistoryResponse,
+    RequestDetailResponse,
     RequestListResponse,
 )
 from src.backend.dashboard.service import (
     ALLOWED_BOARD_STATUSES,
-    InvalidRequestTransitionError,
-    DashboardIdempotencyConflictError,
     ALLOWED_REQUEST_CATEGORIES,
     ALLOWED_REQUEST_PRIORITIES,
     ALLOWED_REQUEST_SORTS,
     ALLOWED_REQUEST_STATUSES,
+    DashboardIdempotencyConflictError,
     DashboardService,
     InvalidDashboardQueryError,
+    InvalidRequestTransitionError,
     ResourceNotFoundError,
 )
-
 
 router = APIRouter(
     prefix="/api/v1",

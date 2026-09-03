@@ -15,11 +15,11 @@ from sqlalchemy import (
     Index,
     Integer,
     Numeric,
-    or_,
     String,
     UniqueConstraint,
     delete,
     func,
+    or_,
     select,
     text,
     update,
@@ -44,6 +44,11 @@ from src.backend.recognition.errors import SessionAlreadyEndedError
 from src.backend.recognition.personalization_types import (
     PhraseUsageRecord,
 )
+from src.backend.recognition.ports import (
+    InferenceResultRecord,
+    VideoAssetRecord,
+    VideoAssetSaveResult,
+)
 from src.backend.recognition.training_candidate_types import (
     TrainingCandidateRecord,
 )
@@ -51,13 +56,6 @@ from src.backend.recognition.video_policy_types import (
     UserConsentRecord,
     VideoPolicyAssetRecord,
 )
-from src.backend.recognition.ports import (
-    InferenceResultRecord,
-    VideoAssetRecord,
-    VideoAssetSaveResult,
-)
-
-
 
 _DASHBOARD_CRITICAL_PHRASE_CODES = frozenset(
     {

@@ -20,7 +20,6 @@ from src.backend.dashboard.service import (
     ResourceNotFoundError,
 )
 
-
 NOW = datetime(
     2026,
     9,

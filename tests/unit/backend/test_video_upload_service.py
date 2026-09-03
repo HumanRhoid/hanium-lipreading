@@ -15,10 +15,10 @@ from src.backend.recognition.errors import (
     VideoTooLargeError,
 )
 from src.backend.recognition.ports import VideoAssetRecord, VideoAssetSaveResult
-from src.backend.recognition.video_upload_service import VideoUploadService
 from src.backend.recognition.video_policy_types import (
     UserConsentRecord,
 )
+from src.backend.recognition.video_upload_service import VideoUploadService
 
 FIXED_NOW = datetime(
     2026,

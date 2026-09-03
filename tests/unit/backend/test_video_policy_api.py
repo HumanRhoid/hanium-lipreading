@@ -15,7 +15,6 @@ from src.backend.recognition.video_policy_types import (
     VideoPolicyAssetRecord,
 )
 
-
 pytestmark = pytest.mark.asyncio
 
 NOW = datetime(

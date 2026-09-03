@@ -7,9 +7,9 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from src.backend.dashboard.adapters.repository import (
+    PatientProfileDetailRecord,
     PatientRequestHistoryPageRecord,
     PatientRequestHistoryRecord,
-    PatientProfileDetailRecord,
 )
 from src.backend.dashboard.api import (
     DashboardAPIError,

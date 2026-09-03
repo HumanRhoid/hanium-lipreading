@@ -11,7 +11,6 @@ from src.backend.recognition.personalization_types import (
     PhraseUsageRecord,
 )
 
-
 pytestmark = pytest.mark.asyncio
 
 NOW = datetime(

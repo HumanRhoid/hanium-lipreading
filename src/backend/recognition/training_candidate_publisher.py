@@ -14,7 +14,6 @@ from src.backend.recognition.training_candidate_types import (
     TrainingCandidateRecord,
 )
 
-
 logger = logging.getLogger(__name__)
 
 TRAINING_CANDIDATE_STREAM: Final = (

@@ -26,7 +26,6 @@ from src.backend.dashboard.service import (
     ResourceNotFoundError,
 )
 
-
 IDEMPOTENCY_KEY = "12345678-1234-4234-8234-123456789abc"
 
 

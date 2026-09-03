@@ -15,6 +15,8 @@ from src.backend.dashboard.adapters.repository import SQLAlchemyDashboardReposit
 from src.backend.dashboard.api import (
     DashboardAPIError,
     dashboard_api_error_handler,
+)
+from src.backend.dashboard.api import (
     router as dashboard_router,
 )
 from src.backend.dashboard.service import DashboardService

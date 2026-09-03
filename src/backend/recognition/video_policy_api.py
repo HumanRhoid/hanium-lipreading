@@ -24,7 +24,6 @@ from src.backend.recognition.video_policy_types import (
     VideoPolicyAssetRecord,
 )
 
-
 logger = logging.getLogger(__name__)
 
 router = APIRouter(

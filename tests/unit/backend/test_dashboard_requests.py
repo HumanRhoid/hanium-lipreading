@@ -18,7 +18,6 @@ from src.backend.dashboard.api import (
 )
 from src.backend.dashboard.service import DashboardService
 
-
 SESSION_TOKEN = "staff-session"
 
 

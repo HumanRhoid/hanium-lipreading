@@ -26,7 +26,6 @@ from src.backend.dashboard.service import (
     ResourceNotFoundError,
 )
 
-
 IDEMPOTENCY_KEY = "complete-key-1042"
 
 

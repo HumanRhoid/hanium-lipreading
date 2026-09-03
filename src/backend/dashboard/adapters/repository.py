@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from datetime import date, datetime
 
 from sqlalchemy import and_, case, func, or_, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import aliased
 
 from src.backend.auth.adapters.repository import User

@@ -1,7 +1,6 @@
 ﻿"""Dashboard persistence behavior against real PostgreSQL."""
 
 import asyncio
-
 from datetime import UTC, date, datetime
 from uuid import uuid4
 
@@ -29,7 +28,6 @@ from src.backend.recognition.domain import (
     PhraseCategory,
     Prediction,
 )
-
 
 pytestmark = pytest.mark.integration
 

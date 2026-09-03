@@ -10,7 +10,6 @@ from src.backend.recognition.personalization_types import (
     PhraseUsageRecord,
 )
 
-
 PERSONALIZATION_KEY_PREFIX: Final = "personalization:"
 PERSONALIZATION_KEY_SUFFIX: Final = ":phrases"
 

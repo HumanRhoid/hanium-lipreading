@@ -13,7 +13,6 @@ from src.backend.recognition.training_candidate_types import (
     TrainingCandidateRecord,
 )
 
-
 pytestmark = pytest.mark.asyncio
 
 NOW = datetime(
